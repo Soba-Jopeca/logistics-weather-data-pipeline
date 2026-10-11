@@ -218,3 +218,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+# Arquivos gerados pelo projeto
+logs/
+data/raw/
+
+# Exemplo público de configuração
+!.env.example
