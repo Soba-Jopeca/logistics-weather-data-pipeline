@@ -35,6 +35,17 @@ A implementação atual do extrator abrange **somente Campinas**, com execução
 
 As decisões sobre processo e consumo serão consolidadas na Reunião 2; contrato de dados, qualidade e critérios de aceite nas reuniões seguintes. O escopo final ainda **não** está homologado.
 
+## Discovery — Reunião 2 (AS-IS / TO-BE)
+
+A Reunião 2 foi encerrada **na simulação empresarial**, com os processos e decisões documentados. Os diagramas abaixo permanecem editáveis no Excalidraw:
+
+- [AS-IS — Processo atual](docs/diagrams/reuniao-02-as-is.excalidraw)
+- [TO-BE — Arquitetura de referência](docs/diagrams/reuniao-02-to-be.excalidraw)
+- [ATA-R2-001 — Reunião 2](docs/06-ata-reuniao-02-processos-as-is-to-be.md)
+- [Discovery, Requisitos e Escopo v1.2](docs/02-discovery-requisitos-escopo-v1.2.md)
+
+O AS-IS representa consultas manuais descentralizadas. O TO-BE representa arquitetura planejada; o extrator manual e JSON bruto para Campinas são as funcionalidades implementadas até aqui. O MVP prevê consultas/tabela consolidada, sem dashboard interativo obrigatório. A biblioteca gráfica de terceiros não integra o repositório.
+
 ## Arquitetura técnica de referência (planejada)
 
 `Open-Meteo API → Python + JSON bruto → PostgreSQL + SQL/ELT → consultas analíticas`
