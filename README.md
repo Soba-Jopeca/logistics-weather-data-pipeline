@@ -17,10 +17,10 @@ O objetivo é **apoiar decisões humanas**, e não automatizar alterações de r
 
 - **Localidades-alvo:** Campinas, São Paulo, Sorocaba, Jundiaí e Ribeirão Preto (SP).
 - **Fonte:** API de previsão meteorológica da Open-Meteo.
-- **Horizonte inicial:** 24 horários consecutivos por localidade e extração.
+- **Janela-alvo do planejamento:** 32 horários por ciclo, de D às 16h a D+2 às 00h (fim exclusivo, America/Sao_Paulo). O extrator manual atual continua limitado a 24 passos.
 - **Variáveis:** precipitação, temperatura e velocidade do vento.
 - **Saída esperada:** dados estruturados por localidade e horário, com histórico de previsões e metadados das execuções.
-- **Necessidade operacional:** disponibilizar informações atualizadas antes das 15h; frequência, margem e regras de frescor serão refinadas no discovery.
+- **Necessidade operacional (meta do contrato R3):** coletas a cada duas horas nas horas pares; rodada pré-planejamento às 14h, fim de tentativas até 14h15, publicação-alvo até 14h30 e frescor máximo de três horas. São requisitos a validar tecnicamente, não garantias já comprovadas.
 
 A implementação atual do extrator abrange **somente Campinas**, com execução manual. As cinco localidades integram o escopo-alvo aprovado **na simulação**, não o estado de implementação.
 
@@ -29,11 +29,11 @@ A implementação atual do extrator abrange **somente Campinas**, com execução
 | Documento | Finalidade | Estado |
 |---|---|---|
 | [Business Case v1.1](docs/01-business-case-v1.1.md) | Problema, oportunidade, objetivos, benefícios esperados e restrições | Baseline do cenário |
-| [Discovery, Requisitos e Escopo v1.1](docs/02-discovery-requisitos-escopo-v1.1.md) | Registro mestre de entrevistas, requisitos, decisões, premissas e gates | Em evolução; Reunião 1 encerrada |
+| [Discovery, Requisitos e Escopo v1.2](docs/02-discovery-requisitos-escopo-v1.2.md) | Baseline histórico do discovery; requisitos anteriores devem ser lidos com as decisões posteriores de R3–R5 | Referência histórica, com atualização consolidada de 32h nas atas seguintes |
 | [ATA-KO-001 — Reunião 1](docs/04-ata-reuniao-01-kickoff-aprovada-simulacao.md) | Decisões DEC-001 a DEC-006 e aprovação fictícia do Kickoff | Aprovada **na simulação** |
-| [Reunião 2 — Abertura e agenda](docs/05-reuniao-02-abertura-e-agenda.md) | Preparação do mapeamento AS-IS/TO-BE | Preparada; ainda não realizada |
+| [Reunião 2 — Abertura e agenda](docs/05-reuniao-02-abertura-e-agenda.md) | Roteiro preparatório do AS-IS/TO-BE | Documento de preparação; reunião encerrada na simulação |
 
-As decisões sobre processo e consumo serão consolidadas na Reunião 2; contrato de dados, qualidade e critérios de aceite nas reuniões seguintes. O escopo final ainda **não** está homologado.
+As cinco reuniões de discovery foram documentadas em exercício simulado. O gate R5 apresenta proposta de aceite condicional do **escopo para desenvolvimento**, sujeita à confirmação do usuário; isso não comprova validação técnica, aceite do produto final nem aprovação de cliente real.
 
 ## Discovery — Reunião 2 (AS-IS / TO-BE)
 
@@ -55,6 +55,13 @@ A Reunião 3 foi **encerrada apenas na simulação**, como baseline de requisito
 - [Matriz de Data Quality v0.1](docs/09-matriz-qualidade-weather-v0.1.md)
 
 O contrato define versões por execução, identidade estável das cinco localidades, rodada/coleta/tentativa HTTP com auditoria, janela de planejamento fixa de 32 horas, coletas periódicas em horas pares, corte às 14h15 na rodada pré-planejamento, publicação até 14h30, limite de frescor de três horas, DQ por produto, fallback controlado e reprocessamento idempotente. **Tudo isso é requisito planejado**, não funcionalidade já entregue pelo `extract_weather.py`.
+
+## Discovery — Reuniões 4 e 5 (Priorização e Playback)
+
+- [ATA-R4-001 — Priorização MoSCoW, riscos e critérios de aceite AC-01 a AC-12](docs/10-ata-reuniao-04-priorizacao-mvp-proposta.md) — documento de escopo revisado e integrado na simulação.
+- [ATA-R5-001 — Playback final e proposta de aceite condicional](docs/11-ata-reuniao-05-playback-aceite-condicional-proposta.md) — minuta integrada após R5, com recomendações de gate e plano de implementação E1–E5.
+
+**Controle de requisitos:** as 32 horas por ciclo definidas em R3 substituem o antigo objetivo de 24 horas para o MVP-alvo. O README distingue essa arquitetura **planejada** do extrator manual já funcional para Campinas (24 passos). O merge das atas no GitHub não demonstra que testes, desempenho, orquestração, banco de dados ou publicação já estejam implementados.
 
 ## Arquitetura técnica de referência (planejada)
 
@@ -97,7 +104,7 @@ O tratamento básico de erros de comunicação existe, mas falhas de rede/HTTP n
 - Preservar os dados originais para rastreabilidade e reprocessamento.
 - Distinguir o instante da previsão do instante da extração e preservar revisões.
 - Tratar dados ausentes e erros explicitamente; nunca converter automaticamente `null` em zero.
-- Projetar cargas idempotentes, com regras de unicidade ainda a definir no contrato de dados.
+- Projetar cargas idempotentes conforme contrato v0.1, com identidade por coleta/hora, integridade Raw e bloqueio de conflitos no mesmo `run_id` (a implementar e testar).
 - Registrar origem, parâmetros, timestamps e identificador de execução.
 - Manter configurações e segredos fora do repositório.
 - Não apresentar resultados hipotéticos como ganhos reais.
