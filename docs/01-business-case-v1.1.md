@@ -32,7 +32,7 @@ O problema é que o planejamento consulta fontes meteorológicas dispersas e nã
 4. Recuperar a versão consultada anteriormente e o momento da coleta.
 5. Identificar coleta incompleta, atraso de atualização e falhas técnicas.
 
-As entrevistas, perguntas, atas, matrizes e pendências estão registradas em `02-discovery-requisitos-escopo-v1.0.md`.
+As entrevistas, perguntas, atas, matrizes e pendências estão registradas em `02-discovery-requisitos-escopo-v1.1.md`.
 
 ## 4. Objetivo e proposta
 
@@ -100,7 +100,7 @@ As entrevistas, perguntas, atas, matrizes e pendências estão registradas em `0
 ## 11. Fontes internas e controle de versões
 
 - `01-business-case-v1.1.md`: justificação e proposta de valor.
-- `02-discovery-requisitos-escopo-v1.0.md`: simulações completas das cinco reuniões, requisitos, escopo mestre, rastreabilidade, aceites e pendências.
+- `02-discovery-requisitos-escopo-v1.1.md`: simulações completas das cinco reuniões, requisitos, escopo mestre, rastreabilidade, aceites e pendências.
 - `03-data-contract-v1.0.md`: próximo documento a preparar após decisões pendentes.
 
 **Nota:** os resultados reais do repositório devem ser comprovados por testes/execuções; não devem ser confundidos com as falas simuladas.
