@@ -46,6 +46,16 @@ A Reunião 2 foi encerrada **na simulação empresarial**, com os processos e de
 
 O AS-IS representa consultas manuais descentralizadas. O TO-BE representa arquitetura planejada; o extrator manual e JSON bruto para Campinas são as funcionalidades implementadas até aqui. O MVP prevê consultas/tabela consolidada, sem dashboard interativo obrigatório. A biblioteca gráfica de terceiros não integra o repositório.
 
+## Discovery — Reunião 3 (Contrato, Qualidade e Governança)
+
+A Reunião 3 foi **encerrada apenas na simulação**, como baseline de requisitos para desenvolvimento. Não comprova implantação nem aceite real.
+
+- [ATA-R3-001 — decisões e responsabilidades](docs/07-ata-reuniao-03-contrato-dados-aprovacao-simulada.md)
+- [Contrato de dados meteorológicos v0.1](docs/08-contrato-dados-weather-v0.1.md)
+- [Matriz de Data Quality v0.1](docs/09-matriz-qualidade-weather-v0.1.md)
+
+O contrato define versões por execução, identidade estável das cinco localidades, rodada/coleta/tentativa HTTP com auditoria, janela de planejamento fixa de 32 horas, coletas periódicas em horas pares, corte às 14h15 na rodada pré-planejamento, publicação até 14h30, limite de frescor de três horas, DQ por produto, fallback controlado e reprocessamento idempotente. **Tudo isso é requisito planejado**, não funcionalidade já entregue pelo `extract_weather.py`.
+
 ## Arquitetura técnica de referência (planejada)
 
 `Open-Meteo API → Python + JSON bruto → PostgreSQL + SQL/ELT → consultas analíticas`
