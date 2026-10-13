@@ -44,7 +44,7 @@ A Reunião 2 foi encerrada **na simulação empresarial**, com os processos e de
 - [ATA-R2-001 — Reunião 2](docs/06-ata-reuniao-02-processos-as-is-to-be.md)
 - [Discovery, Requisitos e Escopo v1.2](docs/02-discovery-requisitos-escopo-v1.2.md)
 
-O AS-IS representa consultas manuais descentralizadas. O TO-BE representa arquitetura planejada; o extrator manual e JSON bruto para Campinas são as funcionalidades implementadas até aqui. O MVP prevê consultas/tabela consolidada, sem dashboard interativo obrigatório. A biblioteca gráfica de terceiros não integra o repositório.
+O AS-IS representa consultas manuais descentralizadas. O TO-BE representa a arquitetura-alvo. Estão implementados o extrator manual para Campinas (24 passos), a persistência de JSON bruto e o ambiente local Docker com PostgreSQL e Airflow. A execução do extrator em contêiner foi validada; DAGs e carga dos dados meteorológicos no PostgreSQL permanecem pendentes. O MVP prevê consultas/tabela consolidada, sem dashboard interativo obrigatório. A biblioteca gráfica de terceiros não integra o repositório.
 
 ## Discovery — Reunião 3 (Contrato, Qualidade e Governança)
 
@@ -72,7 +72,7 @@ O contrato define versões por execução, identidade estável das cinco localid
 - **pytest e avaliação de Soda:** testes e qualidade.
 - **GitHub Actions:** CI/CD.
 
-As ferramentas compõem a arquitetura de referência previamente definida. Banco de dados, containers, Airflow e CI/CD **não estão declarados como implementados**.
+Docker, PostgreSQL para metadados e os serviços webserver e scheduler do Airflow estão configurados e validados localmente. A carga meteorológica no PostgreSQL, as DAGs, os testes automatizados e o CI/CD permanecem pendentes.
 
 ## Etapas de desenvolvimento
 
@@ -96,6 +96,18 @@ Extrator manual para Campinas implementado em Python. Validações informadas:
 - Coletas sucessivas preservadas em arquivos distintos.
 - Importação do módulo sem executar uma coleta.
 - Configuração inválida interrompendo a execução com código 1.
+
+Ambiente Docker validado localmente em 12/10/2026:
+
+- Imagem `jopecadata/logistics-weather-data-pipeline:1.0.0` construída com Python 3.10.14 e Airflow 2.9.2.
+- Provider Docker fixado em 3.13.0 para resolver o conflito de dependências; `pip check` aprovado.
+- PostgreSQL 16 com volume persistente e metadados do Airflow inicializados.
+- Webserver e scheduler com LocalExecutor; três serviços em estado `healthy`.
+- Login na interface confirmado.
+- Extrator executado em contêiner: HTTP 200, 24 horários, validações aprovadas, sem nulos e código de saída 0.
+- JSON produzido no contêiner confirmado em `data/raw/` no Windows.
+
+A imagem foi construída localmente; publicação no Docker Hub ainda não confirmada. Não existem DAGs implementadas nem carga meteorológica no PostgreSQL.
 
 O tratamento básico de erros de comunicação existe, mas falhas de rede/HTTP não foram testadas de forma controlada.
 
@@ -129,6 +141,77 @@ $LASTEXITCODE
 ```
 
 `0`: execução concluída (verifique avisos de nulos). `1`: falha (verifique a mensagem no terminal). Para sair do ambiente: `deactivate`. Não é necessário recriar `venv` a cada execução.
+
+## Execução local com Docker
+
+Pré-requisitos: Docker Desktop iniciado, WSL2 funcional no Windows e Docker Compose disponível. Os comandos abaixo são para PowerShell, na raiz do projeto.
+
+### Construir a imagem
+
+```powershell
+docker build -t jopecadata/logistics-weather-data-pipeline:1.0.0 .
+```
+
+### Preparar a configuração
+
+Crie `.env` a partir de `.env.example` somente se ainda não existir. Preserve as configurações existentes.
+
+Defina `POSTGRES_AIRFLOW_PASSWORD` no `.env`. Para este laboratório, use letras e números, evitando caracteres que precisem de codificação na URL de conexão.
+
+Gere as duas chaves:
+
+```powershell
+docker run --rm --entrypoint python jopecadata/logistics-weather-data-pipeline:1.0.0 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+docker run --rm --entrypoint python jopecadata/logistics-weather-data-pipeline:1.0.0 -c "import secrets; print(secrets.token_hex(32))"
+```
+
+Salve os resultados, respectivamente, em `AIRFLOW_FERNET_KEY` e `AIRFLOW_SECRET_KEY` no `.env`. Gere uma vez e preserve os valores entre reinicializações. Não versione senhas ou chaves.
+
+### Inicializar o ambiente
+
+```powershell
+docker compose config --quiet
+docker compose up -d postgres
+docker compose run --rm airflow-init
+```
+
+Na primeira configuração, crie o administrador; o comando solicita a senha interativamente:
+
+```powershell
+docker compose run --rm airflow-init airflow users create --username joao --firstname Joao --lastname Caneca --role Admin --email admin@example.com
+```
+
+O endereço de e-mail é ilustrativo para o laboratório.
+
+### Iniciar os serviços
+
+```powershell
+docker compose up -d airflow-webserver airflow-scheduler
+docker compose ps
+```
+
+Aguarde os três serviços ficarem `healthy`. Acesse http://localhost:8080 com o utilizador criado. A interface está disponível somente no computador local.
+
+### Testar o extrator no contêiner
+
+Este teste utiliza os parâmetros meteorológicos públicos de `.env.example`:
+
+```powershell
+$weatherConfigPath = (Resolve-Path .\.env.example).Path
+docker compose run --rm --volume "${weatherConfigPath}:/opt/airflow/.env:ro" airflow-init python /opt/airflow/scripts/extract_weather.py
+$LASTEXITCODE
+```
+
+O serviço `airflow-init` é reutilizado com o comando Python, sem executar a migração. O JSON permanece em `data/raw/` no Windows após a remoção do contêiner.
+
+### Parar e retomar
+
+```powershell
+docker compose stop
+docker compose start
+```
+
+O PostgreSQL guarda apenas os metadados do Airflow nesta etapa. Seu volume persiste entre remoções dos contêineres; `docker compose down -v` apaga esse volume.
 
 ## Arquivos gerados e fusos horários
 
