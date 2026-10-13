@@ -2,9 +2,16 @@ import json
 import math
 import sys
 import os
-from datetime import datetime, timedelta, timezone
+import argparse
+from datetime import date, datetime, timedelta, timezone
+import hashlib
+from time import perf_counter
+from copy import deepcopy
+from time import sleep
+from scripts.weather_window import build_cycle_window, evaluate_coverage
 from pathlib import Path
 from uuid import uuid4
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import requests
 from dotenv import load_dotenv
@@ -20,19 +27,97 @@ def required_env(name):
         raise ValueError(f"Configuração obrigatória ausente: {name}")
 
     return value.strip()
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Extrai previsões meteorológicas por ciclo de planejamento."
+    )
 
+    parser.add_argument(
+        "--cycle-date",
+        required=True,
+        type=date.fromisoformat,
+        metavar="AAAA-MM-DD",
+        help="Data local do ciclo de planejamento, por exemplo: 2026-10-13.",
+    )
 
-def load_config():
+    return parser.parse_args()
+def load_locations():
+    path = PROJECT_ROOT / "config" / "locations.json"
+    locations = json.loads(path.read_text(encoding="utf-8-sig"))
+
+    if not isinstance(locations, list) or not locations:
+        raise ValueError("O cadastro deve ser uma lista não vazia.")
+
+    seen_ids = set()
+
+    for location in locations:
+        if not isinstance(location, dict):
+            raise ValueError("Cada localidade deve ser um objeto.")
+
+        for field in ("location_id", "name", "timezone"):
+            value = location.get(field)
+
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"Campo obrigatório inválido: {field}")
+
+            if value != value.strip():
+                raise ValueError(f"Espaços extras no campo: {field}")
+
+        location_id = location["location_id"]
+
+        if location_id in seen_ids:
+            raise ValueError(f"Identificador duplicado: {location_id}")
+
+        seen_ids.add(location_id)
+
+        for field, minimum, maximum in (
+            ("latitude", -90, 90),
+            ("longitude", -180, 180),
+        ):
+            value = location.get(field)
+
+            if (
+                type(value) not in (int, float)
+                or not math.isfinite(value)
+                or not minimum <= value <= maximum
+            ):
+                raise ValueError(
+                    f"{location_id}: coordenada inválida em {field}."
+                )
+
+        try:
+            ZoneInfo(location["timezone"])
+        except (ZoneInfoNotFoundError, ValueError) as error:
+            raise ValueError(
+                f"{location_id}: timezone inválido ou indisponível."
+            ) from error
+
+    return locations
+
+def load_api_config():
     env_path = PROJECT_ROOT / ".env"
 
-    if not env_path.is_file():
-        raise ValueError("Arquivo .env não encontrado na raiz do projeto.")
+    if env_path.is_file():
+        load_dotenv(
+            env_path,
+            encoding="utf-8-sig",
+            override=False,
+        )
 
-    load_dotenv(
-        env_path,
-        encoding="utf-8-sig",
-        override=False,
-    )
+    return {
+        "endpoint": required_env("WEATHER_ENDPOINT"),
+        "timeout": (10, 30),
+    }
+
+
+    env_path = PROJECT_ROOT / ".env"
+
+    if env_path.is_file():
+        load_dotenv(
+            env_path,
+            encoding="utf-8-sig",
+            override=False,
+        )
 
     city = required_env("WEATHER_CITY")
     latitude = float(required_env("WEATHER_LATITUDE"))
@@ -66,115 +151,108 @@ def load_config():
 
     return endpoint, city, params
 
+def build_request_params(location, window):
+    if location["timezone"] != window["timezone"]:
+        raise ValueError("O fuso da localidade difere do fuso do ciclo.")
 
-def fetch_forecast(endpoint, params):
-    response = requests.get(
-        endpoint,
-        params=params,
-        timeout=(10, 30),
-    )
+    start_utc = window["window_start_utc"]
+    last_utc = window["window_end_utc"] - timedelta(hours=1)
 
-    print("HTTP:", response.status_code)
-    response.raise_for_status()
+    return {
+        "latitude": location["latitude"],
+        "longitude": location["longitude"],
+        "hourly": "temperature_2m,precipitation,wind_speed_10m",
+        "timezone": "GMT",
+        "start_hour": start_utc.strftime("%Y-%m-%dT%H:%M"),
+        "end_hour": last_utc.strftime("%Y-%m-%dT%H:%M"),
+        "timeformat": "unixtime",
+        "temperature_unit": "celsius",
+        "wind_speed_unit": "kmh",
+        "precipitation_unit": "mm",
+    }
 
-    return response.json()
-
-def main():
-    # Ler a configuração.
-    endpoint, city, params = load_config()
-    hours = params["forecast_hours"]
-
-    # Identificar a execução e consultar a API.
-    run_id = str(uuid4())
-    requested_at = datetime.now(timezone.utc).isoformat()
-
-    payload = fetch_forecast(endpoint, params)
-
-    collected_at = datetime.now(timezone.utc).isoformat()
+def validate_payload_structure(payload):
     if not isinstance(payload, dict):
         raise ValueError("A resposta JSON deve ser um objeto.")
 
     if payload.get("error"):
         raise ValueError("A API retornou um objeto de erro.")
 
-    print("Identificador da execução:", run_id)
-    print("Pedido iniciado em UTC:", requested_at)
-    print("Resposta recebida em UTC:", collected_at)
-
-    # Validar a estrutura e o tamanho das séries.
     hourly = payload.get("hourly")
+    units = payload.get("hourly_units")
 
     if not isinstance(hourly, dict):
         raise ValueError("Campo hourly ausente ou inválido.")
 
-    for field in ("time", "temperature_2m", "precipitation", "wind_speed_10m"):
-        values = hourly.get(field)
+    if not isinstance(units, dict):
+        raise ValueError("Campo hourly_units ausente ou inválido.")
 
-        if not isinstance(values, list):
-            raise ValueError(f"Série ausente ou inválida: {field}")
-
-        if len(values) != hours:
-            raise ValueError(
-                f"{field}: esperados {hours} valores, recebidos {len(values)}."
-            )
-
-        print(f"{field}: {len(values)} valores")
-
-    # Validar as unidades.
     expected_units = {
-        "time": "iso8601",
+        "time": "unixtime",
         "temperature_2m": "°C",
         "precipitation": "mm",
         "wind_speed_10m": "km/h",
     }
 
-    units = payload.get("hourly_units")
+    sizes = {}
 
-    if not isinstance(units, dict):
-        raise ValueError("Campo hourly_units ausente ou inválido.")
+    for field, expected_unit in expected_units.items():
+        values = hourly.get(field)
 
-    for field, expected in expected_units.items():
-        received = units.get(field)
+        if not isinstance(values, list) or not values:
+            raise ValueError(f"Série ausente, vazia ou inválida: {field}")
 
-        if received != expected:
-            raise ValueError(
-                f"Unidade inesperada em {field}: "
-                f"esperada {expected}, recebida {received}."
-            )
+        if units.get(field) != expected_unit:
+            raise ValueError(f"Unidade inesperada em {field}.")
 
-    print("Unidades validadas.")
+        sizes[field] = len(values)
 
-    # Validar a sequência dos horários.
+    if len(set(sizes.values())) != 1:
+        raise ValueError(f"Séries com tamanhos diferentes: {sizes}")
+
+    if payload.get("timezone") != "GMT":
+        raise ValueError("A resposta deve usar o fuso GMT solicitado.")
+
+    offset = payload.get("utc_offset_seconds")
+
+    if type(offset) is not int or offset != 0:
+        raise ValueError("A resposta solicitada em GMT deve ter offset zero.")
+
+    return hourly
+
+def parse_forecast_times(payload):
+    hourly = payload.get("hourly")
+
+    if not isinstance(hourly, dict):
+        raise ValueError("Campo hourly ausente ou inválido.")
+
+    values = hourly.get("time")
+
+    if not isinstance(values, list) or not values:
+        raise ValueError("Série de horários ausente, vazia ou inválida.")
+
     times = []
 
-    for value in hourly["time"]:
-        if not isinstance(value, str):
-            raise ValueError("Horário ausente ou não textual.")
+    for value in values:
+        if type(value) is not int:
+            raise ValueError("Unix timestamp deve ser um número inteiro.")
 
-        parsed = datetime.fromisoformat(value)
+        try:
+            parsed = datetime.fromtimestamp(value, tz=timezone.utc)
+        except (ValueError, OverflowError, OSError) as error:
+            raise ValueError("Unix timestamp fora do intervalo válido.") from error
+
         times.append(parsed)
 
     for previous, current in zip(times, times[1:]):
         if current - previous != timedelta(hours=1):
-            raise ValueError("Horários repetidos ou não consecutivos.")
+            raise ValueError(
+                "Horários fora de ordem, duplicados ou não consecutivos."
+            )
 
-    print("Sequência de horários validada.")
-    print("Primeiro horário:", hourly["time"][0])
-    print("Último horário:", hourly["time"][-1])
+    return times
 
-    # Validar o fuso do nosso case.
-    if payload.get("timezone") != params["timezone"]:
-        raise ValueError("Fuso retornado diferente do solicitado.")
-
-    offset = payload.get("utc_offset_seconds")
-
-    if type(offset) is not int or offset != -10800:
-        raise ValueError("Deslocamento UTC diferente do esperado para este case.")
-
-    print("Fuso validado:", payload["timezone"])
-    print("Deslocamento UTC em segundos:", offset)
-
-    # Validar os valores e contar os nulos.
+def validate_weather_values(hourly):
     null_counts = {}
 
     for field in ("temperature_2m", "precipitation", "wind_speed_10m"):
@@ -191,57 +269,461 @@ def main():
             if field in ("precipitation", "wind_speed_10m") and value < 0:
                 raise ValueError(f"Valor negativo inválido em {field}.")
 
-    print("Nulos por variável:", null_counts)
+    return null_counts
 
-    if any(null_counts.values()):
-        print("ATENÇÃO: existem dados ausentes; foram preservados.")
-    else:
-        print("Valores validados, sem nulos.")
+def normalize_forecasts(hourly, forecast_times, run_id, location_id):
+    fields = ("temperature_2m", "precipitation", "wind_speed_10m")
 
-    # Reunir metadados e resposta original.
-    document = {
-        "source": "Open-Meteo",
-        "city": city,
-        "run_id": run_id,
-        "requested_at": requested_at,
-        "collected_at": collected_at,
-        "endpoint": endpoint,
-        "request_params": params,
-        "validation": {
-            "record_count": len(hourly["time"]),
-            "first_forecast_time": hourly["time"][0],
-            "last_forecast_time": hourly["time"][-1],
-            "null_counts": null_counts,
-            "status": (
-                "validated_with_nulls"
-                if any(null_counts.values())
-                else "validated"
-            ),
-        },
-        "response": payload,
-    }
+    if any(len(hourly[field]) != len(forecast_times) for field in fields):
+        raise ValueError("Quantidade de valores diferente dos horários.")
 
-    # Gravar sem sobrescrever coletas anteriores.
+    records = []
+
+    for index, forecast_time in enumerate(forecast_times):
+        records.append({
+            "run_id": run_id,
+            "location_id": location_id,
+            "forecast_time_utc": forecast_time.isoformat(),
+            "temperature_2m_c": hourly["temperature_2m"][index],
+            "precipitation_mm": hourly["precipitation"][index],
+            "wind_speed_10m_kmh": hourly["wind_speed_10m"][index],
+        })
+
+    return records
+
+def fetch_forecast_response(endpoint, params, timeout=(10, 30)):
+    return requests.get(
+        endpoint,
+        params=params,
+        timeout=timeout,
+    )
+
+
+def save_raw_bytes(raw_bytes, run_id):
+    # Validar o identificador antes de utilizá-lo no caminho.
+    from uuid import UUID
+
+    canonical_run_id = str(UUID(run_id))
+
     raw_dir = PROJECT_ROOT / "data" / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
 
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-    output_path = raw_dir / f"weather_{stamp}_{run_id}.json"
+    output_path = raw_dir / f"weather_{canonical_run_id}.json"
+    expected_hash = hashlib.sha256(raw_bytes).hexdigest()
+
+    try:
+        with output_path.open("xb") as file:
+            file.write(raw_bytes)
+    except FileExistsError:
+        existing_bytes = output_path.read_bytes()
+
+        if existing_bytes != raw_bytes:
+            raise ValueError(
+                f"Conflito de Raw para run_id={canonical_run_id}. "
+                "O arquivo original foi preservado."
+            )
+
+    saved_bytes = output_path.read_bytes()
+
+    if saved_bytes != raw_bytes:
+        raise OSError("Os bytes gravados diferem do conteúdo recebido.")
+
+    return {
+        "raw_path": output_path.relative_to(PROJECT_ROOT).as_posix(),
+        "raw_sha256": expected_hash,
+    }
+
+def execute_attempt(endpoint, params, timeout, run_id, attempt_no):
+    attempt = {
+        "attempt_id": str(uuid4()),
+        "run_id": run_id,
+        "attempt_no": attempt_no,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "ended_at": None,
+        "duration_ms": None,
+        "http_status": None,
+        "error_category": None,
+        "error_message": None,
+    }
+
+    response = None
+    timer = perf_counter()
+
+    try:
+        response = fetch_forecast_response(endpoint, params, timeout)
+        attempt["http_status"] = response.status_code
+
+        if not 200 <= response.status_code < 300:
+            attempt["error_category"] = "http_error"
+            attempt["error_message"] = f"HTTP {response.status_code}"
+
+    except requests.exceptions.Timeout:
+        attempt["error_category"] = "timeout"
+        attempt["error_message"] = "Tempo de espera HTTP excedido."
+
+    except requests.exceptions.ConnectionError:
+        attempt["error_category"] = "connection_error"
+        attempt["error_message"] = "Falha de conexão com a fonte."
+
+    except requests.exceptions.RequestException as error:
+        attempt["error_category"] = "request_error"
+        attempt["error_message"] = type(error).__name__
+
+    finally:
+        attempt["ended_at"] = datetime.now(timezone.utc).isoformat()
+        attempt["duration_ms"] = round(
+            (perf_counter() - timer) * 1000,
+            3,
+        )
+
+    return response, attempt
+
+def fetch_with_retries(endpoint, params, timeout, run_id, max_attempts=3):
+    if type(max_attempts) is not int or not 1 <= max_attempts <= 3:
+        raise ValueError("max_attempts deve estar entre 1 e 3.")
+
+    frozen_params = deepcopy(params)
+    attempts = []
+    response = None
+
+    for attempt_no in range(1, max_attempts + 1):
+        response, attempt = execute_attempt(
+            endpoint,
+            deepcopy(frozen_params),
+            timeout,
+            run_id,
+            attempt_no,
+        )
+        attempts.append(attempt)
+
+        if attempt["error_category"] is None:
+            return response, attempts
+
+        retryable = (
+            attempt["error_category"] in ("timeout", "connection_error")
+            or attempt["http_status"] in (500, 502, 503, 504)
+        )
+
+        if not retryable or attempt_no == max_attempts:
+            break
+
+        sleep(2 ** (attempt_no - 1))
+
+    return response, attempts
+
+def save_run_report(report):
+    from uuid import UUID
+
+    run_id = str(UUID(report["run_id"]))
+
+    report_dir = PROJECT_ROOT / "data" / "raw" / "runs"
+    report_dir.mkdir(parents=True, exist_ok=True)
+
+    output_path = report_dir / f"{run_id}.json"
 
     content = json.dumps(
-        document,
+        report,
         ensure_ascii=False,
         indent=4,
+        sort_keys=True,
         allow_nan=False,
+    ).encode("utf-8")
+
+    try:
+        with output_path.open("xb") as file:
+            file.write(content)
+    except FileExistsError:
+        if output_path.read_bytes() != content:
+            raise ValueError(
+                f"Relatório conflitante para run_id={run_id}. "
+                "O original foi preservado."
+            )
+
+    if output_path.read_bytes() != content:
+        raise OSError("Falha na conferência do relatório gravado.")
+
+    return output_path.relative_to(PROJECT_ROOT).as_posix()
+
+def process_forecast(payload, window, collected_at, run_id, location_id):
+    hourly = validate_payload_structure(payload)
+    forecast_times = parse_forecast_times(payload)
+    null_counts = validate_weather_values(hourly)
+
+    coverage = evaluate_coverage(
+        window,
+        collected_at,
+        forecast_times,
     )
 
-    with output_path.open("x", encoding="utf-8") as file:
-        file.write(content)
+    records = normalize_forecasts(
+        hourly,
+        forecast_times,
+        run_id,
+        location_id,
+    )
 
-    print("Arquivo salvo:", output_path)
+    validation = {
+        "record_count": len(records),
+        "first_forecast_time_utc": forecast_times[0].isoformat(),
+        "last_forecast_time_utc": forecast_times[-1].isoformat(),
+        "null_counts": null_counts,
+        "coverage": coverage,
+    }
+
+    return records, validation
+
+def collect_location(config, location, cycle_date, batch_id, run_id=None):
+    run_id = str(uuid4()) if run_id is None else run_id
+    location_snapshot = deepcopy(location)
+
+    window = build_cycle_window(
+        cycle_date,
+        location_snapshot["timezone"],
+    )
+    params = build_request_params(location_snapshot, window)
+
+    report = {
+        "run_id": run_id,
+        "batch_id": batch_id,
+        "location_id": location_snapshot["location_id"],
+        "location": location_snapshot,
+        "source": "Open-Meteo",
+        "endpoint": config["endpoint"],
+        "request_params": deepcopy(params),
+        "cycle": {
+            "cycle_date_local": window["cycle_date_local"],
+            "timezone": window["timezone"],
+            "window_start_utc": window["window_start_utc"].isoformat(),
+            "window_end_utc": window["window_end_utc"].isoformat(),
+        },
+        "requested_at": None,
+        "collected_at": None,
+        "run_status": "failed",
+        "raw_path": None,
+        "raw_sha256": None,
+        "attempts": [],
+        "validation": None,
+        "error_category": None,
+        "error_message": None,
+    }
+
+    records = []
+
+    response, attempts = fetch_with_retries(
+        config["endpoint"],
+        params,
+        config["timeout"],
+        run_id,
+    )
+
+    report["attempts"] = attempts
+    report["requested_at"] = attempts[0]["started_at"]
+    last_attempt = attempts[-1]
+
+    try:
+        # Response pode existir mesmo quando o status HTTP indica erro.
+        if response is not None:
+            report["collected_at"] = last_attempt["ended_at"]
+            report.update(save_raw_bytes(response.content, run_id))
+
+        if last_attempt["error_category"] is not None:
+            report["error_category"] = last_attempt["error_category"]
+            report["error_message"] = last_attempt["error_message"]
+
+        else:
+            collected_at = datetime.fromisoformat(report["collected_at"])
+            payload = response.json()
+
+            records, validation = process_forecast(
+                payload,
+                window,
+                collected_at,
+                run_id,
+                location_snapshot["location_id"],
+            )
+
+            report["validation"] = validation
+
+            if not validation["coverage"]["coverage_complete"]:
+                report["run_status"] = "incomplete"
+            elif any(validation["null_counts"].values()):
+                report["run_status"] = "validated_with_nulls"
+            else:
+                report["run_status"] = "validated"
+
+    except ValueError as error:
+        report["error_category"] = "validation_or_raw_conflict"
+        report["error_message"] = str(error)
+
+    except OSError as error:
+        report["error_category"] = "persistence_error"
+        report["error_message"] = type(error).__name__
+
+    report_path = save_run_report(report)
+
+    return {
+        "report": report,
+        "report_path": report_path,
+        "records": records,
+    }
+
+def collect_batch(config, locations, cycle_date):
+    if not locations:
+        raise ValueError("A rodada precisa de pelo menos uma localidade.")
+
+    batch_id = str(uuid4())
+    started_at = datetime.now(timezone.utc).isoformat()
+
+    config_snapshot = deepcopy(config)
+    locations_snapshot = deepcopy(locations)
+    results = []
+
+    for location in locations_snapshot:
+        run_id = str(uuid4())
+
+        try:
+            result = collect_location(
+                config_snapshot,
+                location,
+                cycle_date,
+                batch_id,
+                run_id=run_id,
+            )
+            results.append(result)
+
+        except (ValueError, OSError) as error:
+            results.append({
+                "report": {
+                    "run_id": run_id,
+                    "batch_id": batch_id,
+                    "location_id": location["location_id"],
+                    "run_status": "failed",
+                    "error_category": "run_execution_error",
+                    "error_message": str(error),
+                },
+                "report_path": None,
+                "records": [],
+            })
+
+    successful = sum(
+        result["report"]["run_status"]
+        in ("validated", "validated_with_nulls")
+        for result in results
+    )
+
+    if successful == len(results):
+        batch_status = "success"
+    elif successful:
+        batch_status = "partial_success"
+    else:
+        batch_status = "failed"
+
+    return {
+        "batch_id": batch_id,
+        "cycle_date_local": cycle_date.isoformat(),
+        "started_at": started_at,
+        "ended_at": datetime.now(timezone.utc).isoformat(),
+        "batch_status": batch_status,
+        "location_count": len(results),
+        "successful_location_count": successful,
+        "results": results,
+    }
+
+def save_batch_report(batch):
+    from uuid import UUID
+
+    batch_id = str(UUID(batch["batch_id"]))
+
+    report_dir = PROJECT_ROOT / "data" / "raw" / "batches"
+    report_dir.mkdir(parents=True, exist_ok=True)
+
+    output_path = report_dir / f"{batch_id}.json"
+
+    # Registros normalizados continuam em memória nesta etapa.
+    # O resumo preserva os relatórios e seus caminhos.
+    summary = {
+        key: value
+        for key, value in batch.items()
+        if key != "results"
+    }
+
+    summary["results"] = [
+        {
+            "report": result["report"],
+            "report_path": result["report_path"],
+        }
+        for result in batch["results"]
+    ]
+
+    content = json.dumps(
+        summary,
+        ensure_ascii=False,
+        indent=4,
+        sort_keys=True,
+        allow_nan=False,
+    ).encode("utf-8")
+
+    try:
+        with output_path.open("xb") as file:
+            file.write(content)
+    except FileExistsError:
+        if output_path.read_bytes() != content:
+            raise ValueError(
+                f"Resumo conflitante para batch_id={batch_id}. "
+                "O original foi preservado."
+            )
+
+    if output_path.read_bytes() != content:
+        raise OSError("Falha na conferência do resumo da rodada.")
+
+    return output_path.relative_to(PROJECT_ROOT).as_posix()
+
+def main():
+    args = parse_args()
+    config = load_api_config()
+    locations = load_locations()
+
+    batch = collect_batch(
+        config,
+        locations,
+        args.cycle_date,
+    )
+
+    report_path = save_batch_report(batch)
+
+    print("Batch:", batch["batch_id"])
+    print("Ciclo:", batch["cycle_date_local"])
+    print("Status:", batch["batch_status"])
+    print(
+        "Localidades validadas:",
+        batch["successful_location_count"],
+        "/",
+        batch["location_count"],
+    )
+
+    for result in batch["results"]:
+        report = result["report"]
+
+        print(
+            report["location_id"],
+            "|",
+            report["run_status"],
+            "| registros:",
+            len(result["records"]),
+        )
+
+        if report.get("error_category"):
+            print("  Erro:", report["error_category"])
+
+    print("Resumo salvo:", PROJECT_ROOT / report_path)
+
+    if batch["batch_status"] != "success":
+        return 1
+
+    return 0
 if __name__ == "__main__":
     try:
-        main()
+        sys.exit(main())
     except requests.exceptions.RequestException as error:
         print(
             f"FALHA HTTP ou de conexão: {type(error).__name__}",

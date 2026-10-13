@@ -4,126 +4,201 @@ Pipeline de dados meteorológicos para apoio ao planejamento logístico, desenvo
 
 ## Contexto de negócio
 
-**Consultoria simulada:** Phoenix Data
-**Cliente fictício:** AuroraLog Transportes & Distribuição S.A.
-**Consultor responsável:** Mr. João Caneca
-**Projeto:** PHD-AL-2026-001
+- **Consultoria simulada:** Phoenix Data.
+- **Cliente fictício:** AuroraLog Transportes & Distribuição S.A.
+- **Consultor responsável:** João Pedro Caneca.
+- **Projeto:** PHD-AL-2026-001.
 
-No cenário, o planejamento de transportes consulta previsões meteorológicas manualmente, em fontes diferentes e sem histórico padronizado. A iniciativa busca organizar previsões por localidade e horário, preservar a rastreabilidade das coletas e disponibilizar informações antes do planejamento diário, iniciado aproximadamente às **15h (America/Sao_Paulo)**.
+No cenário, o planejamento de transportes consulta previsões meteorológicas manualmente, em fontes diferentes e sem histórico padronizado. A iniciativa busca organizar previsões por localidade e horário, preservar a rastreabilidade das coletas e disponibilizar informações para o planejamento diário, iniciado aproximadamente às **15h em America/Sao_Paulo**.
 
-O objetivo é **apoiar decisões humanas**, e não automatizar alterações de rotas ou demonstrar causalidade entre clima e atrasos. As entrevistas, as empresas, as métricas operacionais e as aprovações documentadas são simulações; não representam cliente ou contrato reais.
+O objetivo é apoiar decisões humanas. O projeto não automatiza alterações de rotas nem demonstra causalidade entre clima e atrasos. Empresas, entrevistas, métricas operacionais e aprovações de negócio são simulações.
 
 ## Objetivo e escopo do MVP
 
-- **Localidades-alvo:** Campinas, São Paulo, Sorocaba, Jundiaí e Ribeirão Preto (SP).
+- **Localidades:** Campinas, São Paulo, Sorocaba, Jundiaí e Ribeirão Preto, no estado de São Paulo.
 - **Fonte:** API de previsão meteorológica da Open-Meteo.
-- **Janela-alvo do planejamento:** 32 horários por ciclo, de D às 16h a D+2 às 00h (fim exclusivo, America/Sao_Paulo). O extrator manual atual continua limitado a 24 passos.
-- **Variáveis:** precipitação, temperatura e velocidade do vento.
-- **Saída esperada:** dados estruturados por localidade e horário, com histórico de previsões e metadados das execuções.
-- **Necessidade operacional (meta do contrato R3):** coletas a cada duas horas nas horas pares; rodada pré-planejamento às 14h, fim de tentativas até 14h15, publicação-alvo até 14h30 e frescor máximo de três horas. São requisitos a validar tecnicamente, não garantias já comprovadas.
+- **Variáveis:** temperatura em °C, precipitação em mm e velocidade do vento em km/h.
+- **Janela do planejamento:** ciclo D, de D às 16h até D+2 às 00h, com fim exclusivo em `America/Sao_Paulo`.
+- **Cobertura inicial:** normalmente 32 horários por cidade, calculados pelos limites da janela convertidos para UTC.
+- **Coleta tardia:** a cobertura exigida começa na primeira hora cheia igual ou posterior a `collected_at`, respeitando o início da janela.
+- **Identificação do ciclo:** argumento obrigatório `--cycle-date AAAA-MM-DD`.
+- **Consumo previsto:** consultas SQL e tabela consolidada. Não há dashboard obrigatório.
 
-A implementação atual do extrator abrange **somente Campinas**, com execução manual. As cinco localidades integram o escopo-alvo aprovado **na simulação**, não o estado de implementação.
+A necessidade operacional documentada prevê coletas a cada duas horas nas horas pares, rodada pré-planejamento às 14h, encerramento das tentativas até 14h15, publicação-alvo até 14h30 e frescor máximo de três horas no uso. Esses controles ainda precisam ser implementados e validados.
 
-## Documentação e governança
+## Estado atual
 
-| Documento | Finalidade | Estado |
+### Extração Python local — validada em 13/10/2026
+
+A primeira rodada real das cinco cidades foi concluída com:
+
+- Status de rodada `success` e código de saída `0`.
+- Cinco localidades com estado `validated`.
+- 32 horários por cidade, totalizando 160 registros.
+- Unidades, estrutura, sequência UTC, cobertura e valores validados.
+- Nenhum valor nulo nessa rodada.
+- Cinco respostas Raw e respectivos relatórios individuais.
+- Um resumo da rodada.
+- Hashes SHA-256 conferidos a partir dos bytes persistidos.
+
+**Batch de referência:** `fc8057d2-702c-4da3-90b1-61159f8917c2`.
+
+Os arquivos dessa rodada são evidências locais e não são versionados.
+
+### Cenários controlados verificados
+
+Foram executadas verificações manuais com dados simulados e mocks para:
+
+- Construção da janela e conversão entre timezone IANA e UTC.
+- Coleta anterior ao início, coleta em hora exata, coleta tardia e ciclo encerrado.
+- Cobertura completa e identificação de horário ausente.
+- Conversão de Unix timestamps e rejeição de horários duplicados.
+- Rejeição de séries com tamanhos diferentes, unidades incorretas, valores infinitos e precipitação negativa.
+- Preservação de nulos e aceitação de temperaturas negativas.
+- Associação das medidas ao horário, à cidade e ao run corretos.
+- Gravação Raw, conferência de hash, replay de bytes idênticos e bloqueio de conflito.
+- Registro de sucesso HTTP e timeout.
+- Recuperação após timeout, limite de três tentativas e ausência de repetição no erro HTTP 400.
+- Continuidade da rodada após resultado de falha em uma cidade.
+- Fluxo integrado de cinco cidades com respostas simuladas e persistência temporária.
+
+Essas verificações foram realizadas durante o desenvolvimento. A suíte de testes reproduzível no repositório e sua integração ao CI continuam pendentes.
+
+### Ambiente Docker — baseline validado em 12/10/2026
+
+- Imagem local `jopecadata/logistics-weather-data-pipeline:1.0.0`.
+- Airflow 2.9.2 com Python 3.10.14.
+- Provider Docker fixado em 3.13.0; `pip check` aprovado.
+- PostgreSQL 16 com volume persistente para metadados do Airflow.
+- Webserver e scheduler com `LocalExecutor`.
+- Três serviços em estado `healthy` e login confirmado.
+- Versão anterior do extrator, para Campinas e 24 horários, executada no contêiner com JSON persistido no Windows.
+
+**A nova extração de cinco cidades ainda precisa ser validada no contêiner.** A imagem precisa incorporar as dependências atuais, e o cadastro deve estar disponível no ambiente de execução.
+
+A publicação da imagem no Docker Hub permanece pendente. Não existem DAGs implementadas nem carga meteorológica no PostgreSQL.
+
+## Contrato temporal
+
+Cada execução manual informa explicitamente a data do ciclo. Isso evita associar automaticamente uma coleta ao ciclo errado durante a virada de dia ou a sobreposição de janelas.
+
+Exemplo para o ciclo `2026-10-13`:
+
+| Limite | America/Sao_Paulo | UTC |
 |---|---|---|
-| [Business Case v1.1](docs/01-business-case-v1.1.md) | Problema, oportunidade, objetivos, benefícios esperados e restrições | Baseline do cenário |
-| [Discovery, Requisitos e Escopo v1.2](docs/02-discovery-requisitos-escopo-v1.2.md) | Baseline histórico do discovery; requisitos anteriores devem ser lidos com as decisões posteriores de R3–R5 | Referência histórica, com atualização consolidada de 32h nas atas seguintes |
-| [ATA-KO-001 — Reunião 1](docs/04-ata-reuniao-01-kickoff-aprovada-simulacao.md) | Decisões DEC-001 a DEC-006 e aprovação fictícia do Kickoff | Aprovada **na simulação** |
-| [Reunião 2 — Abertura e agenda](docs/05-reuniao-02-abertura-e-agenda.md) | Roteiro preparatório do AS-IS/TO-BE | Documento de preparação; reunião encerrada na simulação |
+| Início incluído | 13/10/2026 às 16h | 13/10/2026 às 19h |
+| Último horário | 14/10/2026 às 23h | 15/10/2026 às 02h |
+| Fim exclusivo | 15/10/2026 às 00h | 15/10/2026 às 03h |
 
-As cinco reuniões de discovery foram documentadas em exercício simulado. O gate R5 apresenta proposta de aceite condicional do **escopo para desenvolvimento**, sujeita à confirmação do usuário; isso não comprova validação técnica, aceite do produto final nem aprovação de cliente real.
+Nesse ciclo:
 
-## Discovery — Reunião 2 (AS-IS / TO-BE)
+- Coleta antes das 16h exige todos os 32 horários.
+- Coleta às 18h00 exatas inclui as 18h e exige 30 horários.
+- Coleta às 18h07 exige os horários a partir das 19h, totalizando 29.
+- Coleta no fim exclusivo ou depois não recebe cobertura completa.
 
-A Reunião 2 foi encerrada **na simulação empresarial**, com os processos e decisões documentados. Os diagramas abaixo permanecem editáveis no Excalidraw:
+O cálculo usa `zoneinfo` e regras reais de timezone. Não fixa permanentemente o deslocamento UTC em três horas.
 
-- [AS-IS — Processo atual](docs/diagrams/reuniao-02-as-is.excalidraw)
-- [TO-BE — Arquitetura de referência](docs/diagrams/reuniao-02-to-be.excalidraw)
-- [ATA-R2-001 — Reunião 2](docs/06-ata-reuniao-02-processos-as-is-to-be.md)
-- [Discovery, Requisitos e Escopo v1.2](docs/02-discovery-requisitos-escopo-v1.2.md)
+A API é consultada com limites em `GMT` e `timeformat=unixtime`. Os registros normalizados usam timestamps UTC com informação de fuso.
 
-O AS-IS representa consultas manuais descentralizadas. O TO-BE representa a arquitetura-alvo. Estão implementados o extrator manual para Campinas (24 passos), a persistência de JSON bruto e o ambiente local Docker com PostgreSQL e Airflow. A execução do extrator em contêiner foi validada; DAGs e carga dos dados meteorológicos no PostgreSQL permanecem pendentes. O MVP prevê consultas/tabela consolidada, sem dashboard interativo obrigatório. A biblioteca gráfica de terceiros não integra o repositório.
+## Cadastro de localidades
 
-## Discovery — Reunião 3 (Contrato, Qualidade e Governança)
+O arquivo `config/locations.json` mantém os identificadores internos, nomes, coordenadas, timezone e identificadores da fonte de geocodificação.
 
-A Reunião 3 foi **encerrada apenas na simulação**, como baseline de requisitos para desenvolvimento. Não comprova implantação nem aceite real.
+| Localidade | location_id | Latitude | Longitude |
+|---|---|---:|---:|
+| Campinas | br_sp_campinas | -22.90556 | -47.06083 |
+| São Paulo | br_sp_sao_paulo | -23.5475 | -46.63611 |
+| Sorocaba | br_sp_sorocaba | -23.50167 | -47.45806 |
+| Jundiaí | br_sp_jundiai | -23.18639 | -46.88417 |
+| Ribeirão Preto | br_sp_ribeirao_preto | -21.1775 | -47.81028 |
 
-- [ATA-R3-001 — decisões e responsabilidades](docs/07-ata-reuniao-03-contrato-dados-aprovacao-simulada.md)
-- [Contrato de dados meteorológicos v0.1](docs/08-contrato-dados-weather-v0.1.md)
-- [Matriz de Data Quality v0.1](docs/09-matriz-qualidade-weather-v0.1.md)
+Todas usam `America/Sao_Paulo`.
 
-O contrato define versões por execução, identidade estável das cinco localidades, rodada/coleta/tentativa HTTP com auditoria, janela de planejamento fixa de 32 horas, coletas periódicas em horas pares, corte às 14h15 na rodada pré-planejamento, publicação até 14h30, limite de frescor de três horas, DQ por produto, fallback controlado e reprocessamento idempotente. **Tudo isso é requisito planejado**, não funcionalidade já entregue pelo `extract_weather.py`.
+As coordenadas foram conferidas na API de geocodificação da Open-Meteo. Representam pontos de referência das cidades, não centros de distribuição reais.
 
-## Discovery — Reuniões 4 e 5 (Priorização e Playback)
+O cadastro e os parâmetros são copiados para preservar a configuração usada na coleta. As coordenadas retornadas pela previsão podem corresponder à célula do modelo meteorológico e diferir das solicitadas.
 
-- [ATA-R4-001 — Priorização MoSCoW, riscos e critérios de aceite AC-01 a AC-12](docs/10-ata-reuniao-04-priorizacao-mvp-proposta.md) — documento de escopo revisado e integrado na simulação.
-- [ATA-R5-001 — Playback final e proposta de aceite condicional](docs/11-ata-reuniao-05-playback-aceite-condicional-proposta.md) — minuta integrada após R5, com recomendações de gate e plano de implementação E1–E5.
+## Fluxo implementado
 
-**Controle de requisitos:** as 32 horas por ciclo definidas em R3 substituem o antigo objetivo de 24 horas para o MVP-alvo. O README distingue essa arquitetura **planejada** do extrator manual já funcional para Campinas (24 passos). O merge das atas no GitHub não demonstra que testes, desempenho, orquestração, banco de dados ou publicação já estejam implementados.
+1. Ler a data do ciclo, a configuração da API e o cadastro.
+2. Criar uma rodada com `batch_id`.
+3. Criar um `run_id` por cidade.
+4. Construir a janela e congelar os parâmetros da requisição.
+5. Consultar a API com tentativas limitadas.
+6. Preservar os bytes da última resposta recebida e calcular seu hash.
+7. Validar estrutura, unidades, horários, valores e cobertura.
+8. Produzir registros normalizados em memória.
+9. Gravar o relatório da cidade.
+10. Classificar a rodada e gravar seu resumo.
 
-## Arquitetura técnica de referência (planejada)
+Uma falha registrada em uma cidade permite continuar para as demais.
 
-`Open-Meteo API → Python + JSON bruto → PostgreSQL + SQL/ELT → consultas analíticas`
+### Tentativas HTTP
 
-- **Docker:** ambiente de execução local reproduzível.
-- **Apache Airflow:** agendamento e orquestração.
-- **pytest e avaliação de Soda:** testes e qualidade.
-- **GitHub Actions:** CI/CD.
+Cada chamada possui `attempt_id`, número da tentativa, início e fim UTC, duração, status HTTP e categoria de erro.
 
-Docker, PostgreSQL para metadados e os serviços webserver e scheduler do Airflow estão configurados e validados localmente. A carga meteorológica no PostgreSQL, as DAGs, os testes automatizados e o CI/CD permanecem pendentes.
+A política atual permite até três tentativas, com esperas de um e dois segundos. Repete timeout, falha de conexão e HTTP 500, 502, 503 ou 504. Outros erros, incluindo 400 e 429, encerram as tentativas do run.
 
-## Etapas de desenvolvimento
+O timeout é de 10 segundos para conexão e 30 segundos de espera de leitura. Não representa um limite total de duração da coleta.
 
-1. Documentar problema, requisitos e decisões de discovery.
-2. Preparar o ambiente Python e explorar a Open-Meteo.
-3. Definir contrato de extração e validar o extrator manual para Campinas.
-4. Ampliar a extração às localidades aprovadas.
-5. Persistir e transformar dados no PostgreSQL com SQL.
-6. Containerizar com Docker e orquestrar com Airflow.
-7. Implementar testes automatizados e verificações de qualidade.
-8. Configurar GitHub Actions e validar a entrega ponta a ponta.
+## Estados e qualidade
 
-## Estado atual — validações realizadas localmente
+### Estado por cidade
 
-Extrator manual para Campinas implementado em Python. Validações informadas:
+| Estado | Significado |
+|---|---|
+| validated | Validações aprovadas, cobertura exigida completa e ausência de nulos na resposta |
+| validated_with_nulls | Cobertura exigida completa, com nulos preservados e sinalizados |
+| incomplete | Estrutura e valores processados, mas cobertura exigida não atendida |
+| failed | Falha HTTP, de validação ou de persistência |
 
-- Requisição à Open-Meteo com retorno HTTP 200.
-- Conferência de 24 horários consecutivos e das três séries meteorológicas.
-- Validação de unidades, fuso, tipos numéricos e contagem de nulos.
-- Gravação e releitura de JSON contendo metadados e resposta original.
-- Coletas sucessivas preservadas em arquivos distintos.
-- Importação do módulo sem executar uma coleta.
-- Configuração inválida interrompendo a execução com código 1.
+### Estado da rodada
 
-Ambiente Docker validado localmente em 12/10/2026:
+| Estado | Significado |
+|---|---|
+| success | Todas as cidades ficaram em validated ou validated_with_nulls |
+| partial_success | Parte das cidades atingiu esses estados |
+| failed | Nenhuma cidade atingiu esses estados |
 
-- Imagem `jopecadata/logistics-weather-data-pipeline:1.0.0` construída com Python 3.10.14 e Airflow 2.9.2.
-- Provider Docker fixado em 3.13.0 para resolver o conflito de dependências; `pip check` aprovado.
-- PostgreSQL 16 com volume persistente e metadados do Airflow inicializados.
-- Webserver e scheduler com LocalExecutor; três serviços em estado `healthy`.
-- Login na interface confirmado.
-- Extrator executado em contêiner: HTTP 200, 24 horários, validações aprovadas, sem nulos e código de saída 0.
-- JSON produzido no contêiner confirmado em `data/raw/` no Windows.
+**Sucesso de extração não equivale a publicação ou aptidão de todos os produtos.** Nulos permanecem `null`; totais, médias e máximos integrais exigem completude das métricas e dos horários necessários.
 
-A imagem foi construída localmente; publicação no Docker Hub ainda não confirmada. Não existem DAGs implementadas nem carga meteorológica no PostgreSQL.
+Frescor no uso, publicação, fallback, consulta histórica as-of e sinalização de atraso operacional permanecem pendentes.
 
-O tratamento básico de erros de comunicação existe, mas falhas de rede/HTTP não foram testadas de forma controlada.
+## Arquivos gerados
 
-## Princípios de engenharia
+Os arquivos ficam em `data/raw/`:
 
-- Preservar os dados originais para rastreabilidade e reprocessamento.
-- Distinguir o instante da previsão do instante da extração e preservar revisões.
-- Tratar dados ausentes e erros explicitamente; nunca converter automaticamente `null` em zero.
-- Projetar cargas idempotentes conforme contrato v0.1, com identidade por coleta/hora, integridade Raw e bloqueio de conflitos no mesmo `run_id` (a implementar e testar).
-- Registrar origem, parâmetros, timestamps e identificador de execução.
-- Manter configurações e segredos fora do repositório.
-- Não apresentar resultados hipotéticos como ganhos reais.
+| Caminho | Conteúdo |
+|---|---|
+| weather_<run_id>.json | Bytes do corpo da última resposta HTTP recebida |
+| runs/<run_id>.json | Metadados, cadastro usado, ciclo, parâmetros, tentativas, validações e referência ao Raw |
+| batches/<batch_id>.json | Resumo da rodada e resultados individuais |
 
-## Preparação do ambiente
+O Raw utiliza `response.content`, após eventual descompressão feita pelo Requests. O hash SHA-256 corresponde aos bytes efetivamente gravados e fica no relatório do run.
 
-Ambiente utilizado no desenvolvimento: Windows, PowerShell e Python 3.13. Após clonar o repositório, na raiz do projeto:
+O mesmo `run_id` com bytes idênticos reutiliza o arquivo. Conteúdo conflitante é bloqueado, preservando o original. Uma nova coleta gera novos identificadores.
+
+O relatório também bloqueia conteúdo conflitante no mesmo identificador. A auditoria completa de incidentes de replay ainda precisa ser consolidada.
+
+As tentativas anteriores ficam registradas nos metadados; seus corpos HTTP não são preservados individualmente nesta versão.
+
+Os registros normalizados são produzidos em memória, com:
+
+- `run_id`
+- `location_id`
+- `forecast_time_utc`
+- `temperature_2m_c`
+- `precipitation_mm`
+- `wind_speed_10m_kmh`
+
+Sua persistência no PostgreSQL será implementada posteriormente.
+
+## Preparação do ambiente Python
+
+Ambiente local utilizado: Windows, PowerShell e Python 3.13.
+
+Após clonar o repositório, execute na raiz do projeto:
 
 ```powershell
 python -m venv venv
@@ -131,43 +206,106 @@ python -m venv venv
 python -m pip install -r requirements.txt
 ```
 
-Crie `.env` a partir de `.env.example`. Se `.env` já existir, revise-o sem sobrescrever configurações. Esta consulta não exige chave de API. Variáveis do terminal têm prioridade sobre `.env`.
+O pacote `tzdata` está registrado nas dependências para disponibilizar as regras de timezone, inclusive no Windows.
+
+Crie `.env` a partir de `.env.example` somente se ainda não existir. Preserve as configurações existentes.
+
+Para a extração, a configuração necessária é:
+
+```dotenv
+WEATHER_ENDPOINT=https://api.open-meteo.com/v1/forecast
+```
+
+O arquivo `.env` é opcional quando a variável já está definida no ambiente. Variáveis do terminal têm prioridade sobre o arquivo.
+
+Não é necessária chave de API para esta consulta pública. Credenciais do Docker/Airflow permanecem no `.env` local.
 
 ## Execução manual
 
+Na raiz do projeto, com o ambiente virtual ativo:
+
 ```powershell
-python scripts/extract_weather.py
+python -m scripts.extract_weather --cycle-date 2026-10-13
 $LASTEXITCODE
 ```
 
-`0`: execução concluída (verifique avisos de nulos). `1`: falha (verifique a mensagem no terminal). Para sair do ambiente: `deactivate`. Não é necessário recriar `venv` a cada execução.
+Substitua a data pelo ciclo que deseja consultar, dentro da cobertura disponível na API. O exemplo acima corresponde à rodada validada em 13/10/2026.
 
-## Execução local com Docker
+Para consultar a ajuda sem realizar coleta:
 
-Pré-requisitos: Docker Desktop iniciado, WSL2 funcional no Windows e Docker Compose disponível. Os comandos abaixo são para PowerShell, na raiz do projeto.
+```powershell
+python -m scripts.extract_weather --help
+```
+
+Códigos de saída:
+
+- `0`: rodada com status `success`, podendo conter nulos sinalizados.
+- `1`: rodada parcial, falha de execução ou falha de persistência.
+- `2`: erro de argumentos identificado pelo `argparse`.
+
+O resumo é gravado antes do retorno do código da rodada, quando a persistência está disponível.
+
+Para sair do ambiente virtual:
+
+```powershell
+deactivate
+```
+
+Não é necessário recriar o ambiente a cada execução.
+
+## Exploração no Postman
+
+A coleção pública fica em:
+
+```text
+postman/collections/Logistics Weather Pipeline/
+```
+
+Ela contém uma requisição GET de Campinas com janela fixa, `GMT`, `unixtime` e unidades do contrato, sem autenticação ou corpo de requisição.
+
+As datas salvas representam a prova de conceito de outubro de 2026 e devem ser ajustadas para novas consultas.
+
+A pasta `.postman/`, que vincula o projeto ao workspace local, não é versionada.
+
+## Ambiente local com Docker
+
+A implementação atual utiliza `compose.yaml`, `LocalExecutor` e PostgreSQL 16 para metadados do Airflow. Não utiliza Redis nem worker Celery.
+
+Pré-requisitos: Docker Desktop iniciado, WSL2 funcional no Windows e Docker Compose disponível.
 
 ### Construir a imagem
+
+Na raiz do projeto:
 
 ```powershell
 docker build -t jopecadata/logistics-weather-data-pipeline:1.0.0 .
 ```
 
-### Preparar a configuração
+Alterações nas dependências exigem reconstrução da imagem.
 
-Crie `.env` a partir de `.env.example` somente se ainda não existir. Preserve as configurações existentes.
+### Configurar o laboratório
 
-Defina `POSTGRES_AIRFLOW_PASSWORD` no `.env`. Para este laboratório, use letras e números, evitando caracteres que precisem de codificação na URL de conexão.
+No `.env` local, mantenha:
 
-Gere as duas chaves:
+```dotenv
+POSTGRES_AIRFLOW_PASSWORD=
+AIRFLOW_FERNET_KEY=
+AIRFLOW_SECRET_KEY=
+```
+
+Preencha com os valores locais. Para este laboratório, a senha PostgreSQL utiliza letras e números, evitando caracteres que precisem de codificação na URL de conexão.
+
+Na primeira configuração, gere as chaves:
 
 ```powershell
 docker run --rm --entrypoint python jopecadata/logistics-weather-data-pipeline:1.0.0 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+
 docker run --rm --entrypoint python jopecadata/logistics-weather-data-pipeline:1.0.0 -c "import secrets; print(secrets.token_hex(32))"
 ```
 
-Salve os resultados, respectivamente, em `AIRFLOW_FERNET_KEY` e `AIRFLOW_SECRET_KEY` no `.env`. Gere uma vez e preserve os valores entre reinicializações. Não versione senhas ou chaves.
+Salve os resultados em `AIRFLOW_FERNET_KEY` e `AIRFLOW_SECRET_KEY`, respectivamente. Preserve os valores entre reinicializações.
 
-### Inicializar o ambiente
+### Inicializar e iniciar os serviços
 
 ```powershell
 docker compose config --quiet
@@ -175,7 +313,7 @@ docker compose up -d postgres
 docker compose run --rm airflow-init
 ```
 
-Na primeira configuração, crie o administrador; o comando solicita a senha interativamente:
+Na primeira configuração, crie o administrador. A senha é solicitada interativamente:
 
 ```powershell
 docker compose run --rm airflow-init airflow users create --username joao --firstname Joao --lastname Caneca --role Admin --email admin@example.com
@@ -183,26 +321,26 @@ docker compose run --rm airflow-init airflow users create --username joao --firs
 
 O endereço de e-mail é ilustrativo para o laboratório.
 
-### Iniciar os serviços
+Inicie os serviços:
 
 ```powershell
 docker compose up -d airflow-webserver airflow-scheduler
 docker compose ps
 ```
 
-Aguarde os três serviços ficarem `healthy`. Acesse http://localhost:8080 com o utilizador criado. A interface está disponível somente no computador local.
+Aguarde PostgreSQL, webserver e scheduler ficarem `healthy`. A interface local está disponível em http://localhost:8080.
 
-### Testar o extrator no contêiner
+### Validação da nova extração no contêiner
 
-Este teste utiliza os parâmetros meteorológicos públicos de `.env.example`:
+A execução anterior de Campinas com 24 horários foi validada. A versão atual de cinco cidades ainda precisa ser verificada após:
 
-```powershell
-$weatherConfigPath = (Resolve-Path .\.env.example).Path
-docker compose run --rm --volume "${weatherConfigPath}:/opt/airflow/.env:ro" airflow-init python /opt/airflow/scripts/extract_weather.py
-$LASTEXITCODE
-```
+- Reconstruir a imagem com as dependências atualizadas.
+- Disponibilizar `config/locations.json` no contêiner.
+- Confirmar os módulos do projeto e o diretório de trabalho.
+- Executar com `python -m scripts.extract_weather --cycle-date`.
+- Conferir os arquivos persistidos e seus hashes no Windows.
 
-O serviço `airflow-init` é reutilizado com o comando Python, sem executar a migração. O JSON permanece em `data/raw/` no Windows após a remoção do contêiner.
+O comando antigo de execução direta do script foi substituído pela execução como módulo. O comando Docker definitivo será registrado após a validação da configuração atual.
 
 ### Parar e retomar
 
@@ -211,35 +349,101 @@ docker compose stop
 docker compose start
 ```
 
-O PostgreSQL guarda apenas os metadados do Airflow nesta etapa. Seu volume persiste entre remoções dos contêineres; `docker compose down -v` apaga esse volume.
+O PostgreSQL guarda apenas metadados do Airflow nesta etapa. O volume `postgres-data` persiste entre remoções de contêineres. O comando `docker compose down -v` apaga esse volume.
 
-## Arquivos gerados e fusos horários
+A imagem é local e o Compose utiliza `pull_policy: never`. A publicação no Docker Hub está pendente.
 
-Cada coleta é salva em `data/raw/` usando timestamp UTC e identificador da execução, sem substituir coletas anteriores. O JSON registra fonte, localidade, execução, timestamps UTC de início e fim, endpoint, parâmetros, validações e resposta original em `response`.
+## Arquitetura de referência
 
-Os horários da previsão usam `America/Sao_Paulo`. Os timestamps da coleta usam UTC com `+00:00`. Dados ausentes permanecem `null` e são sinalizados.
+```text
+Open-Meteo → Python → Raw e relatórios → PostgreSQL + SQL/ELT → consultas analíticas
+```
+
+- **Implementado:** extração manual, cadastro, janela por ciclo, tentativas, validações e persistência Raw/relatórios.
+- **Ambiente configurado:** Docker, PostgreSQL de metadados e serviços do Airflow.
+- **Pendente:** carga meteorológica, DAGs, publicação, fallback, suíte de testes versionada e CI/CD.
+
+## Documentação e governança
+
+| Documento | Finalidade |
+|---|---|
+| [Business Case v1.1](docs/01-business-case-v1.1.md) | Problema, objetivos, benefícios esperados e restrições |
+| [Discovery e Escopo v1.2](docs/02-discovery-requisitos-escopo-v1.2.md) | Baseline histórico, complementado pelas decisões posteriores |
+| [Reunião 1 — Kickoff](docs/04-ata-reuniao-01-kickoff-aprovada-simulacao.md) | Decisões iniciais e aprovação fictícia |
+| [Reunião 2 — Agenda](docs/05-reuniao-02-abertura-e-agenda.md) | Preparação do AS-IS/TO-BE |
+| [Reunião 2 — Ata](docs/06-ata-reuniao-02-processos-as-is-to-be.md) | Processos, decisões e requisitos |
+| [Reunião 3 — Ata](docs/07-ata-reuniao-03-contrato-dados-aprovacao-simulada.md) | Contrato, qualidade e responsabilidades |
+| [Contrato de dados v0.1](docs/08-contrato-dados-weather-v0.1.md) | Grãos, temporalidade, integridade e rastreabilidade |
+| [Matriz de qualidade v0.1](docs/09-matriz-qualidade-weather-v0.1.md) | Regras DQ-01 a DQ-12 e testes de aceite |
+| [Reunião 4 — Proposta](docs/10-ata-reuniao-04-priorizacao-mvp-proposta.md) | Priorização, riscos e critérios de aceite |
+| [Reunião 5 — Proposta](docs/11-ata-reuniao-05-playback-aceite-condicional-proposta.md) | Playback e proposta de aceite condicional |
+
+Diagramas editáveis no Excalidraw:
+
+- [AS-IS — Processo atual](docs/diagrams/reuniao-02-as-is.excalidraw)
+- [TO-BE — Arquitetura de referência](docs/diagrams/reuniao-02-to-be.excalidraw)
+
+O contrato e a matriz DQ são baselines documentais aprovados na simulação R3. R4 e R5 permanecem propostas conforme seus documentos. A documentação não comprova implantação nem aceite de cliente real.
+
+A janela por ciclo definida em R3 substitui o objetivo anterior de 24 horas. As evidências técnicas deste README indicam o que foi efetivamente verificado.
+
+## Próximas entregas
+
+1. Consolidar cenários controlados em testes versionados, incluindo timeout integrado em uma cidade e continuidade das demais.
+2. Validar a nova extração no contêiner.
+3. Consolidar auditoria de conflitos e regras de aptidão por produto.
+4. Integrar a extração às DAGs do Airflow.
+5. Implementar a persistência meteorológica e as transformações SQL.
+6. Implementar publicação, frescor, fallback e consulta histórica as-of.
+7. Validar agenda, prazos, atraso e comportamento operacional.
+8. Configurar CI/CD e testar a entrega ponta a ponta.
+
+## Princípios de engenharia
+
+- Preservar dados originais e a geografia utilizada em cada coleta.
+- Distinguir horário da previsão, coleta e publicação.
+- Manter nulos explícitos.
+- Identificar rodada, run e tentativa HTTP.
+- Congelar parâmetros durante as retentativas.
+- Conferir integridade dos arquivos e bloquear conflitos.
+- Isolar falhas por cidade.
+- Distinguir sucesso de extração de disponibilidade e aptidão dos produtos.
+- Manter credenciais fora do repositório.
+- Não apresentar resultados hipotéticos como ganhos medidos.
 
 ## Limitações e custos
 
-- Execução manual apenas para Campinas, com 24 passos horários.
-- Uma tentativa HTTP com timeout, ainda sem retries automáticos.
-- Não existe armazenamento de quarentena para respostas inválidas.
-- Preservar arquivos sucessivos não equivale a idempotência de carga no PostgreSQL.
-- Previsão não demonstra clima observado nem explica atrasos de entregas.
-- Infraestrutura planejada para execução local com ferramentas gratuitas; agendamentos dependem da disponibilidade do computador e dos serviços.
-- O uso e a atribuição dos dados seguirão as condições da Open-Meteo; GitHub Actions também está sujeito aos limites de uso.
+- A execução atual é manual; depende do computador e dos serviços locais.
+- A associação do ciclo é explícita; sua seleção automática será definida na orquestração.
+- A agenda, o corte das tentativas, a publicação e o atraso ainda não são automatizados.
+- As regras DQ-01 a DQ-12 não estão integralmente implementadas.
+- Não existe fallback operacional, controle de frescor no uso ou publicação as-of.
+- Replay de arquivos não comprova idempotência de carga no PostgreSQL.
+- Não há garantia de recuperação de uma gravação interrompida.
+- Previsões de modelo não representam observações confirmadas nem explicam atrasos de entregas.
+- O objetivo é infraestrutura local sem contratação de serviços pagos, sujeito às condições das ferramentas e APIs.
+- Uso e atribuição dos dados devem respeitar as condições da Open-Meteo. CI/CD também depende dos limites do plano utilizado.
 
 ## Arquivos fora do versionamento
 
-O `.gitignore` exclui `venv`, `.env`, caches, logs e dados em `data/raw/`; `.env.example` é o modelo público de configuração.
+O `.gitignore` exclui o ambiente virtual, `.env`, caches, logs, `data/raw/` e `.postman/`.
+
+São públicos e versionáveis:
+
+- `.env.example`, com valores de exemplo.
+- Cadastro de localidades.
+- Código e dependências.
+- Documentação.
+- Coleção Postman revisada, sem credenciais.
 
 ## Fonte de dados
 
 - [Open-Meteo](https://open-meteo.com/)
-- [Documentação da API](https://open-meteo.com/en/docs)
+- [Weather Forecast API](https://open-meteo.com/en/docs)
+- [Geocoding API](https://open-meteo.com/en/docs/geocoding-api)
 
 ## Autoria
 
-João Pedro Caneca — https://github.com/Soba-Jopeca
+João Pedro Caneca — [Soba-Jopeca](https://github.com/Soba-Jopeca)
 
 Projeto autoral de aprendizado e portfólio de Engenharia de Dados, desenvolvido incrementalmente. Não redistribui código de cursos usados como referência.

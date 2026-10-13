@@ -224,3 +224,5 @@ data/raw/
 
 # Exemplo público de configuração
 !.env.example
+# Vinculo local ao workspace do Postman
+.postman/

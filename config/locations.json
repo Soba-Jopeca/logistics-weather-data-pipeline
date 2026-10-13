@@ -1,0 +1,42 @@
+[
+  {
+    "location_id": "br_sp_campinas",
+    "name": "Campinas",
+    "latitude": -22.90556,
+    "longitude": -47.06083,
+    "timezone": "America/Sao_Paulo",
+    "geocoding_id": 3467865
+  },
+  {
+    "location_id": "br_sp_sao_paulo",
+    "name": "São Paulo",
+    "latitude": -23.5475,
+    "longitude": -46.63611,
+    "timezone": "America/Sao_Paulo",
+    "geocoding_id": 3448439
+  },
+  {
+    "location_id": "br_sp_sorocaba",
+    "name": "Sorocaba",
+    "latitude": -23.50167,
+    "longitude": -47.45806,
+    "timezone": "America/Sao_Paulo",
+    "geocoding_id": 3447399
+  },
+  {
+    "location_id": "br_sp_jundiai",
+    "name": "Jundiaí",
+    "latitude": -23.18639,
+    "longitude": -46.88417,
+    "timezone": "America/Sao_Paulo",
+    "geocoding_id": 3459462
+  },
+  {
+    "location_id": "br_sp_ribeirao_preto",
+    "name": "Ribeirão Preto",
+    "latitude": -21.1775,
+    "longitude": -47.81028,
+    "timezone": "America/Sao_Paulo",
+    "geocoding_id": 3451328
+  }
+]

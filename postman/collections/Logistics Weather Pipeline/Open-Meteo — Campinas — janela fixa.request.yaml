@@ -1,0 +1,46 @@
+$kind: http-request
+description: ""
+url: https://api.open-meteo.com/v1/forecast?latitude=-22.90556&longitude=-47.06083&hourly=temperature_2m,precipitation,wind_speed_10m&timezone=GMT&start_hour=2026-10-13T19:00&end_hour=2026-10-15T02:00&timeformat=unixtime&temperature_unit=celsius&wind_speed_unit=kmh&precipitation_unit=mm
+method: GET
+queryParams:
+  - key: latitude
+    value: "-22.90556"
+    disabled: false
+    description: ""
+  - key: longitude
+    value: "-47.06083"
+    disabled: false
+    description: ""
+  - key: hourly
+    value: temperature_2m,precipitation,wind_speed_10m
+    disabled: false
+    description: ""
+  - key: timezone
+    value: GMT
+    disabled: false
+    description: ""
+  - key: start_hour
+    value: 2026-10-13T19:00
+    disabled: false
+    description: ""
+  - key: end_hour
+    value: 2026-10-15T02:00
+    disabled: false
+    description: ""
+  - key: timeformat
+    value: unixtime
+    disabled: false
+    description: ""
+  - key: temperature_unit
+    value: celsius
+    disabled: false
+    description: ""
+  - key: wind_speed_unit
+    value: kmh
+    disabled: false
+    description: ""
+  - key: precipitation_unit
+    value: mm
+    disabled: false
+    description: ""
+order: 1000
