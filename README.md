@@ -80,7 +80,9 @@ Essas verificações foram realizadas durante o desenvolvimento. A suíte de tes
 
 Os 160 registros normalizados foram produzidos em memória; sua carga no PostgreSQL permanece pendente.
 
-A publicação da imagem no Docker Hub permanece pendente. Não existem DAGs implementadas nem banco meteorológico provisionado.
+Imagem publicada no Docker Hub em 13/10/2026. Pull pelo digest e execução verificados no mesmo computador, com Airflow 2.9.2, tzdata 2026.5 e `pip check` aprovado. Reprodução completa em máquina limpa ainda não validada.
+
+Não existem DAGs implementadas nem banco meteorológico provisionado.
 
 ## Contrato temporal
 
@@ -383,7 +385,43 @@ docker compose start
 
 O PostgreSQL guarda apenas metadados do Airflow nesta etapa. O volume `postgres-data` persiste entre remoções de contêineres. O comando `docker compose down -v` apaga esse volume.
 
-A imagem é local e o Compose utiliza `pull_policy: never`. A publicação no Docker Hub está pendente.
+### Imagem publicada no Docker Hub
+
+Repositório: [jopecadata/logistics-weather-data-pipeline](https://hub.docker.com/r/jopecadata/logistics-weather-data-pipeline).
+
+Tag publicada: `1.0.0`.
+
+Digest do índice OCI:
+
+```text
+sha256:3aef1bab0449408e82325a554aaa882dfbd4077578d99923f10d857744888930
+```
+
+A imagem executável publicada é para `linux/amd64`. Ela contém Airflow, Python e dependências; código, cadastro e dados são disponibilizados pelos mounts do projeto.
+
+Para obter a versão identificada pelo digest:
+
+```powershell
+$publishedWeatherImage = 'jopecadata/logistics-weather-data-pipeline@sha256:3aef1bab0449408e82325a554aaa882dfbd4077578d99923f10d857744888930'
+docker pull $publishedWeatherImage
+```
+
+Validações executadas:
+
+```powershell
+docker run --rm --entrypoint python $publishedWeatherImage -c "import airflow; from importlib.metadata import version; print('Airflow:', airflow.__version__); print('tzdata:', version('tzdata'))"
+docker run --rm --entrypoint python $publishedWeatherImage -m pip check
+```
+
+Resultados: Airflow 2.9.2, tzdata 2026.5 e dependências sem conflitos. O pull reutilizou camadas locais; não comprova reprodução em máquina limpa.
+
+O Compose mantém a tag `1.0.0` e `pull_policy: never`. Em máquina limpa, obtenha a imagem antes de iniciar:
+
+```powershell
+docker pull jopecadata/logistics-weather-data-pipeline:1.0.0
+```
+
+A tag pode mudar; o digest identifica o conteúdo publicado nesta validação. A reprodução completa exige também o repositório, os arquivos montados, a configuração local e a inicialização dos metadados.
 
 ### Recriar e verificar a persistência
 
@@ -441,7 +479,7 @@ A janela por ciclo definida em R3 substitui o objetivo anterior de 24 horas. As 
 ## Próximas entregas
 
 1. Consolidar cenários controlados em testes versionados, incluindo timeout integrado em uma cidade e continuidade das demais.
-2. Fechar as pendências do ambiente Docker: documentar a adaptação arquitetural ao curso, publicar e validar a obtenção da imagem pelo Docker Hub e provisionar o banco meteorológico separado.
+2. Provisionar o banco meteorológico separado e validar a reprodução completa do ambiente em máquina limpa.
 3. Consolidar auditoria de conflitos e regras de aptidão por produto.
 4. Integrar a extração às DAGs do Airflow.
 5. Implementar a persistência meteorológica e as transformações SQL.
