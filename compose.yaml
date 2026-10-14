@@ -2,6 +2,7 @@ name: logistics-weather
 
 x-airflow-common: &airflow-common
   image: jopecadata/logistics-weather-data-pipeline:1.0.0
+  working_dir: /opt/airflow
   pull_policy: never
   environment:
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: "postgresql+psycopg2://airflow:${POSTGRES_AIRFLOW_PASSWORD:?Define POSTGRES_AIRFLOW_PASSWORD no .env}@postgres:5432/airflow"
@@ -12,6 +13,7 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
     AIRFLOW__CORE__PARALLELISM: "4"
     AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: "4"
+    WEATHER_ENDPOINT: ${WEATHER_ENDPOINT:?Define WEATHER_ENDPOINT no .env}
   volumes:
     - ./dags:/opt/airflow/dags
     - ./logs:/opt/airflow/logs
@@ -19,6 +21,7 @@ x-airflow-common: &airflow-common
     - ./scripts:/opt/airflow/scripts
     - ./include:/opt/airflow/include
     - ./data:/opt/airflow/data
+    - ./config/locations.json:/opt/airflow/config/locations.json:ro
   depends_on:
     postgres:
       condition: service_healthy

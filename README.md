@@ -64,19 +64,23 @@ Foram executadas verificações manuais com dados simulados e mocks para:
 
 Essas verificações foram realizadas durante o desenvolvimento. A suíte de testes reproduzível no repositório e sua integração ao CI continuam pendentes.
 
-### Ambiente Docker — baseline validado em 12/10/2026
+### Ambiente Docker — atualizado e validado em 13/10/2026
 
-- Imagem local `jopecadata/logistics-weather-data-pipeline:1.0.0`.
+- Imagem local `jopecadata/logistics-weather-data-pipeline:1.0.0`, reconstruída com as dependências atuais, incluindo `tzdata==2026.5`.
 - Airflow 2.9.2 com Python 3.10.14.
-- Provider Docker fixado em 3.13.0; `pip check` aprovado.
-- PostgreSQL 16 com volume persistente para metadados do Airflow.
-- Webserver e scheduler com `LocalExecutor`.
-- Três serviços em estado `healthy` e login confirmado.
-- Versão anterior do extrator, para Campinas e 24 horários, executada no contêiner com JSON persistido no Windows.
+- Provider Docker fixado em 3.13.0; `pip check` aprovado no build.
+- PostgreSQL 16 para metadados do Airflow, com volume `postgres-data`.
+- Webserver e scheduler com `LocalExecutor`; três serviços `healthy` e login confirmado.
+- Imports, fuso IANA e cadastro de cinco localidades verificados no contêiner.
+- Extração do ciclo `2026-10-13` concluída com status `success`, cinco cidades, 32 registros por cidade e código de saída 0.
+- Raw e relatórios confirmados no Windows, com hashes SHA-256 conferidos.
+- Persistência validada após `docker compose down` sem `-v` e recriação: migração com código 0, serviços saudáveis, login existente preservado e arquivos íntegros.
 
-**A nova extração de cinco cidades ainda precisa ser validada no contêiner.** A imagem precisa incorporar as dependências atuais, e o cadastro deve estar disponível no ambiente de execução.
+**Batch de referência no contêiner:** `ac2066c6-3250-48c1-b2c6-2b507f777bc1`.
 
-A publicação da imagem no Docker Hub permanece pendente. Não existem DAGs implementadas nem carga meteorológica no PostgreSQL.
+Os 160 registros normalizados foram produzidos em memória; sua carga no PostgreSQL permanece pendente.
+
+A publicação da imagem no Docker Hub permanece pendente. Não existem DAGs implementadas nem banco meteorológico provisionado.
 
 ## Contrato temporal
 
@@ -288,6 +292,7 @@ Alterações nas dependências exigem reconstrução da imagem.
 No `.env` local, mantenha:
 
 ```dotenv
+WEATHER_ENDPOINT=https://api.open-meteo.com/v1/forecast
 POSTGRES_AIRFLOW_PASSWORD=
 AIRFLOW_FERNET_KEY=
 AIRFLOW_SECRET_KEY=
@@ -330,17 +335,24 @@ docker compose ps
 
 Aguarde PostgreSQL, webserver e scheduler ficarem `healthy`. A interface local está disponível em http://localhost:8080.
 
-### Validação da nova extração no contêiner
+### Executar a extração no contêiner
 
-A execução anterior de Campinas com 24 horários foi validada. A versão atual de cinco cidades ainda precisa ser verificada após:
+A configuração compartilhada define `/opt/airflow` como diretório de trabalho, fornece `WEATHER_ENDPOINT` por ambiente e monta `config/locations.json` somente para leitura. O `.env` completo não é montado no contêiner.
 
-- Reconstruir a imagem com as dependências atualizadas.
-- Disponibilizar `config/locations.json` no contêiner.
-- Confirmar os módulos do projeto e o diretório de trabalho.
-- Executar com `python -m scripts.extract_weather --cycle-date`.
-- Conferir os arquivos persistidos e seus hashes no Windows.
+Na raiz do projeto, execute:
 
-O comando antigo de execução direta do script foi substituído pela execução como módulo. O comando Docker definitivo será registrado após a validação da configuração atual.
+```powershell
+docker compose run --rm --no-deps --entrypoint python airflow-init -m scripts.extract_weather --cycle-date 2026-10-13
+$LASTEXITCODE
+```
+
+Substitua a data pelo ciclo desejado, dentro da cobertura disponível na API. `2026-10-13` identifica o ciclo usado na validação registrada.
+
+O comando reutiliza a configuração de `airflow-init`, mas executa Python diretamente. Não realiza migração nem exige PostgreSQL em execução para a coleta.
+
+A execução validada produziu 32 registros por cidade, totalizando 160, com status `success` e código 0. Raw e relatórios permanecem em `data/raw/` no Windows pelo bind mount de `data/`.
+
+Os registros normalizados continuam em memória nesta etapa.
 
 ### Parar e retomar
 
@@ -352,6 +364,25 @@ docker compose start
 O PostgreSQL guarda apenas metadados do Airflow nesta etapa. O volume `postgres-data` persiste entre remoções de contêineres. O comando `docker compose down -v` apaga esse volume.
 
 A imagem é local e o Compose utiliza `pull_policy: never`. A publicação no Docker Hub está pendente.
+
+### Recriar e verificar a persistência
+
+Procedimento validado em 13/10/2026:
+
+```powershell
+docker compose down
+docker compose up -d postgres
+docker compose run --rm airflow-init
+$LASTEXITCODE
+docker compose up -d airflow-webserver airflow-scheduler
+docker compose ps
+```
+
+Execute um comando por vez e interrompa se houver erro. Aguarde os três serviços ficarem `healthy` e confirme o login com o utilizador existente, sem recriá-lo.
+
+Na validação, os metadados de acesso permaneceram disponíveis no volume PostgreSQL. O resumo da rodada, os cinco Raw e os relatórios individuais permaneceram no Windows, com hashes SHA-256 conferidos.
+
+Não acrescente `-v` ao comando `down`: essa opção remove o volume PostgreSQL.
 
 ## Arquitetura de referência
 
@@ -390,7 +421,7 @@ A janela por ciclo definida em R3 substitui o objetivo anterior de 24 horas. As 
 ## Próximas entregas
 
 1. Consolidar cenários controlados em testes versionados, incluindo timeout integrado em uma cidade e continuidade das demais.
-2. Validar a nova extração no contêiner.
+2. Fechar as pendências do ambiente Docker: documentar a adaptação arquitetural ao curso, publicar e validar a obtenção da imagem pelo Docker Hub e provisionar o banco meteorológico separado.
 3. Consolidar auditoria de conflitos e regras de aptidão por produto.
 4. Integrar a extração às DAGs do Airflow.
 5. Implementar a persistência meteorológica e as transformações SQL.
