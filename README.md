@@ -273,7 +273,27 @@ A pasta `.postman/`, que vincula o projeto ao workspace local, não é versionad
 
 ## Ambiente local com Docker
 
-A implementação atual utiliza `compose.yaml`, `LocalExecutor` e PostgreSQL 16 para metadados do Airflow. Não utiliza Redis nem worker Celery.
+A implementação atual utiliza `compose.yaml`, Airflow com `LocalExecutor` e PostgreSQL 16.
+
+### Escolhas de arquitetura
+
+**LocalExecutor**
+
+O projeto é executado num único computador, com processamento em lote e sem necessidade atual de distribuir tarefas entre máquinas. O LocalExecutor permite executar tarefas em processos locais no contêiner do scheduler, mantendo o ambiente com três serviços: PostgreSQL, webserver e scheduler.
+
+Essa escolha reduz os componentes a configurar e operar. A concorrência está limitada a quatro tarefas globais e quatro por DAG, como configuração inicial a avaliar durante a implementação dos fluxos. A coleta atual das cinco cidades é sequencial; esses limites não a tornam paralela.
+
+O ambiente depende da disponibilidade e dos recursos do computador local. A escolha será revista se houver necessidade de execução distribuída, isolamento dos workers ou maior capacidade de processamento.
+
+**PostgreSQL 16**
+
+O PostgreSQL 16 foi mantido porque o ambiente com Airflow 2.9.2 passou pelas verificações locais de inicialização dos metadados, funcionamento dos serviços, login e persistência após recriação dos contêineres.
+
+Fixar a versão principal evita mudanças automáticas entre versões principais. A tag `postgres:16` ainda pode receber atualizações menores; ela não fixa uma imagem imutável.
+
+Nesta etapa, o banco `airflow` armazena somente metadados da orquestração. Os dados meteorológicos terão banco e utilizador próprios, a provisionar separadamente. Compartilharão inicialmente a mesma instância PostgreSQL, sem isolamento de infraestrutura.
+
+Mudanças de versão principal serão planejadas com backup e procedimento de migração, preservando o volume existente.
 
 Pré-requisitos: Docker Desktop iniciado, WSL2 funcional no Windows e Docker Compose disponível.
 
