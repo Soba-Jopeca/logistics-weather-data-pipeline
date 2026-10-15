@@ -82,7 +82,9 @@ Os 160 registros normalizados foram produzidos em memória; sua carga no Postgre
 
 Imagem publicada no Docker Hub em 13/10/2026. Pull pelo digest e execução verificados no mesmo computador, com Airflow 2.9.2, tzdata 2026.5 e `pip check` aprovado. Reprodução completa em máquina limpa ainda não validada.
 
-Não existem DAGs implementadas nem banco meteorológico provisionado.
+Em 14/10/2026, o banco `weather` e a role `weather_app` foram provisionados na instância PostgreSQL original. Conexão autenticada pelo contêiner Python, permissões mínimas, bloqueio de acesso aos metadados e persistência após reinicialização foram verificados. O passo 04 aguarda submissão das evidências e validação central.
+
+Não existem DAGs, tabelas meteorológicas ou cargas implementadas.
 
 ## Contrato temporal
 
@@ -293,7 +295,11 @@ O PostgreSQL 16 foi mantido porque o ambiente com Airflow 2.9.2 passou pelas ver
 
 Fixar a versão principal evita mudanças automáticas entre versões principais. A tag `postgres:16` ainda pode receber atualizações menores; ela não fixa uma imagem imutável.
 
-Nesta etapa, o banco `airflow` armazena somente metadados da orquestração. Os dados meteorológicos terão banco e utilizador próprios, a provisionar separadamente. Compartilharão inicialmente a mesma instância PostgreSQL, sem isolamento de infraestrutura.
+O banco `airflow` armazena metadados da orquestração. O banco `weather` foi provisionado separadamente, com a role de aplicação `weather_app`. Ambos compartilham a mesma instância e o mesmo volume PostgreSQL, sem isolamento de infraestrutura.
+
+A role `airflow` permanece proprietária administrativa dos dois bancos e superuser. `weather_app` possui somente `CONNECT` em `weather` e `USAGE` no schema `public`, sem criação de schemas, tabelas permanentes ou temporárias e sem poderes administrativos. Permissões sobre futuras tabelas serão definidas na etapa correspondente.
+
+O privilégio `CONNECT` de `PUBLIC` foi removido do banco `airflow`. A conexão de `weather_app` aos metadados foi recusada, enquanto novas conexões do Airflow e o login existente permaneceram funcionais. As permissões dos bancos de sistema não foram alteradas.
 
 Mudanças de versão principal serão planejadas com backup e procedimento de migração, preservando o volume existente.
 
@@ -383,7 +389,18 @@ docker compose stop
 docker compose start
 ```
 
-O PostgreSQL guarda apenas metadados do Airflow nesta etapa. O volume `postgres-data` persiste entre remoções de contêineres. O comando `docker compose down -v` apaga esse volume.
+A instância PostgreSQL contém os bancos `airflow` e `weather`. O banco meteorológico ainda não possui tabelas de negócio nem dados carregados. O volume `postgres-data` mantém ambos os bancos entre remoções de contêineres. O comando `docker compose down -v` apaga esse volume.
+
+### Configuração do banco meteorológico
+
+Os parâmetros de conexão pela rede interna do Compose são:
+
+```dotenv
+WEATHER_DB_HOST=postgres
+WEATHER_DB_PORT=5432
+WEATHER_DB_NAME=weather
+WEATHER_DB_USER=weather_app
+WEATHER_DB_PASSWORD=
 
 ### Imagem publicada no Docker Hub
 
@@ -449,8 +466,9 @@ Open-Meteo → Python → Raw e relatórios → PostgreSQL + SQL/ELT → consult
 ```
 
 - **Implementado:** extração manual, cadastro, janela por ciclo, tentativas, validações e persistência Raw/relatórios.
-- **Ambiente configurado:** Docker, PostgreSQL de metadados e serviços do Airflow.
-- **Pendente:** carga meteorológica, DAGs, publicação, fallback, suíte de testes versionada e CI/CD.
+- **Ambiente configurado:** Docker, serviços Airflow e PostgreSQL com bancos `airflow` e `weather`, além da role `weather_app`.
+- **Testes da extração:** 73 testes versionados no passo 02, commit `80b9960`; não repetidos no contêiner durante o passo 03.
+- **Pendente:** especificação e implementação da orquestração, carga meteorológica, publicação dos produtos de dados, fallback e CI/CD, conforme os gates centrais.
 
 ## Documentação e governança
 
@@ -478,14 +496,18 @@ A janela por ciclo definida em R3 substitui o objetivo anterior de 24 horas. As 
 
 ## Próximas entregas
 
-1. Consolidar cenários controlados em testes versionados, incluindo timeout integrado em uma cidade e continuidade das demais.
-2. Provisionar o banco meteorológico separado e validar a reprodução completa do ambiente em máquina limpa.
-3. Consolidar auditoria de conflitos e regras de aptidão por produto.
-4. Integrar a extração às DAGs do Airflow.
-5. Implementar a persistência meteorológica e as transformações SQL.
-6. Implementar publicação, frescor, fallback e consulta histórica as-of.
-7. Validar agenda, prazos, atraso e comportamento operacional.
-8. Configurar CI/CD e testar a entrega ponta a ponta.
+A evolução segue o checkpoint CP-2026-10-13 v2:
+
+1. Submeter as evidências do provisionamento do passo 04 e aguardar validação central.
+2. Após liberação do passo 05, especificar a orquestração Airflow.
+3. Após liberação do passo 06, preparar a interface Python pura/CLI.
+4. Após liberação do passo 07, implementar DAG pausada, com `schedule=None`, e validar parsing sem executar tarefas.
+5. Após liberação do passo 08, realizar a primeira execução manual.
+6. No passo 09, testar falhas e retentativas; ensaiar agenda somente após autorização específica.
+7. No passo 10, consolidar o gate da Seção 4, documentação e versionamento.
+8. Somente no passo 11, implementar DDL, carga e SQL meteorológicos, com os gates correspondentes.
+
+A reprodução do passo 03 foi validada centralmente com ressalvas: mesma máquina, reutilização de cache e ausência de validação em outro host. Essas limitações permanecem registradas.
 
 ## Princípios de engenharia
 
