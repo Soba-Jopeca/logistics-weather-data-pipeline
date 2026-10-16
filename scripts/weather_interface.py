@@ -429,6 +429,40 @@ def verify_batch_artifacts(*, project_root, manifest):
         "batch_report_path": reference,
         "artifact_hashes": artifact_hashes,
     }
+def build_execution_config(manifest_config):
+    """Reconstrói a configuração de execução sem alterar o manifesto."""
+    import math
+
+    if not isinstance(manifest_config, dict):
+        raise ValueError("A configuração do manifesto deve ser um objeto.")
+
+    if set(manifest_config) != {"endpoint", "timeout"}:
+        raise ValueError("Campos de configuração diferentes dos esperados.")
+
+    endpoint = manifest_config["endpoint"]
+
+    if endpoint != "https://api.open-meteo.com/v1/forecast":
+        raise ValueError("Endpoint diferente do aprovado.")
+
+    timeout = manifest_config["timeout"]
+
+    if not isinstance(timeout, (list, tuple)) or len(timeout) != 2:
+        raise ValueError("Timeout deve conter os tempos de conexão e leitura.")
+
+    for value in timeout:
+        if type(value) not in (int, float):
+            raise ValueError("Os tempos de timeout devem ser numéricos.")
+
+        if not math.isfinite(value) or value <= 0:
+            raise ValueError("Os tempos de timeout devem ser finitos e positivos.")
+
+    if tuple(timeout) != (10, 30):
+        raise ValueError("Timeout diferente da política aprovada.")
+
+    return {
+        "endpoint": endpoint,
+        "timeout": (timeout[0], timeout[1]),
+    }
 
 def execute_extraction(
     *,
@@ -517,6 +551,10 @@ def execute_extraction(
             ):
                 raise ValueError("Artefatos existentes sem conclusão confirmada.")
 
+            phase = "execution_error"
+            execution_config = build_execution_config(manifest["config"])
+
+            phase = "ambiguous_state"
             claim = claim_extraction(
                 project_root=project_root,
                 batch_id=batch_id,
@@ -526,7 +564,7 @@ def execute_extraction(
             phase = "execution_error"
 
             batch = collect_batch(
-                manifest["config"],
+                execution_config,
                 manifest["locations"],
                 date.fromisoformat(manifest["cycle_date_local"]),
                 batch_id=batch_id,
@@ -543,6 +581,21 @@ def execute_extraction(
 
             phase = "persistence_error"
             save_batch_report(batch, project_root=project_root)
+            execution_failures = [
+                result["report"]["location_id"]
+                for result in batch["results"]
+                if result["report_path"] is None
+                and result["report"].get("error_category")
+                == "run_execution_error"
+            ]
+
+            if execution_failures:
+                phase = "execution_error"
+                raise ValueError(
+                    "Falha de execução sem relatório individual persistido: "
+                    + ", ".join(execution_failures)
+                )
+
 
             phase = "artifact_integrity"
             verified = verify_batch_artifacts(

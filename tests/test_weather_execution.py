@@ -348,3 +348,73 @@ def test_incident_write_failure_is_explicit(
         )
 
     assert not (root / "data/orchestration/incidents").exists()
+
+def test_execution_error_preserves_primary_cause(
+    monkeypatch,
+    prepared_execution,
+):
+    root, locations, reference = prepared_execution
+    calls = []
+
+    def failing_collection(config, location, *args, **kwargs):
+        calls.append(location["location_id"])
+        raise ValueError("Configuracao invalida simulada")
+
+    def unexpected_verification(**kwargs):
+        raise AssertionError(
+            "Falha de execução não deve avançar para integridade."
+        )
+
+    monkeypatch.setattr(
+        extractor,
+        "collect_location",
+        failing_collection,
+    )
+    monkeypatch.setattr(
+        interface,
+        "verify_batch_artifacts",
+        unexpected_verification,
+    )
+
+    with pytest.raises(ValueError, match="Incidente:"):
+        interface.execute_extraction(
+            **execution_arguments(root, reference)
+        )
+
+    assert calls == [
+        location["location_id"] for location in locations
+    ]
+
+    summary_path = (
+        root
+        / "data/raw/batches"
+        / f"{reference['batch_id']}.json"
+    )
+    summary = json.loads(summary_path.read_bytes())
+
+    assert summary["batch_status"] == "failed"
+    assert len(summary["results"]) == 5
+
+    for result in summary["results"]:
+        assert result["report_path"] is None
+        assert result["report"]["error_category"] == "run_execution_error"
+        assert result["report"]["error_message"] == (
+            "Configuracao invalida simulada"
+        )
+
+    incidents = list(
+        (root / "data/orchestration/incidents").glob("*.json")
+    )
+    assert len(incidents) == 1
+
+    incident = json.loads(incidents[0].read_bytes())
+    assert incident["category"] == "execution_error"
+    assert incident["batch_id"] == reference["batch_id"]
+
+    completed_path = (
+        root
+        / "data/orchestration/executions"
+        / reference["batch_id"]
+        / "completed.json"
+    )
+    assert not completed_path.exists()
