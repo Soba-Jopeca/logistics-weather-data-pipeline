@@ -13,6 +13,7 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
     AIRFLOW__CORE__PARALLELISM: "4"
     AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: "4"
+    PYTHONPATH: /opt/airflow
     WEATHER_ENDPOINT: ${WEATHER_ENDPOINT:?Define WEATHER_ENDPOINT no .env}
   volumes:
     - ./dags:/opt/airflow/dags
