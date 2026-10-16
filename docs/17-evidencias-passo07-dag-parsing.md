@@ -5,7 +5,8 @@
 **Baseline:** 109544ebb30542bc8fb4fbba460a0dca7e55c613
 **Liberação central:** apresentada por João em 15/10/2026, restrita à
 implementação e validação sem executar tasks.
-**Estado:** implementação e parsing isolado concluídos; evidências locais Docker/UI pendentes.
+**Estado:** evidências técnicas consolidadas; conferência Git local final pendente antes da submissão ao Planeamento.
+**Atualização:** 16/10/2026 — America/Sao_Paulo.
 
 Passos01–02 e05–06 validados;03–04 com ressalvas;07 liberado;
 08–11 NÃO LIBERADOS. Nenhuma execução é autorizada por este documento.
@@ -61,10 +62,11 @@ equivale a I/O autoral. Não criar DagRun, TaskInstance ou banco para os testes.
 Não executar suíte de comportamento HTTP/replay ou chamar funções de task
 neste gate. Testes existentes não são repetidos sem justificativa.
 
-### Verificações futuras no computador de João
+### Procedimento no computador de João
 
-Executar somente após sincronização e revisão do estado local, um bloco
-de cada vez. Estes comandos estão documentados; não são evidência de execução.
+Os comandos foram documentados antes das validações, realizadas após a
+sincronização local. As saídas recebidas e a confirmação visual estão
+registradas na seção de resultados abaixo. O procedimento não executa tasks.
 
 ```powershell
 git status
@@ -83,7 +85,7 @@ O teste usa somente unittest da biblioteca padrão. Pode ser fornecido por stdin
 ao Python do scheduler, sem instalar dependências de teste ou mudar mounts:
 
 ```powershell
-Get-Content -Raw -Encoding UTF8 tests/test_weather_dag_structure.py | docker compose -p logistics-weather exec -T airflow-scheduler python -c "import sys; source=sys.stdin.read(); filename='/opt/airflow/tests/test_weather_dag_structure.py'; exec(compile(source, filename, 'exec'), {'__name__': '__main__', '__file__': filename})"
+Get-Content -Raw -Encoding UTF8 tests/test_weather_dag_structure.py | docker compose -p logistics-weather exec -T airflow-scheduler python -c "import sys; filename='/opt/airflow/tests/test_weather_dag_structure.py'; globals()['__file__']=filename; exec(compile(sys.stdin.read(), filename, 'exec'), globals())"
 ```
 
 O nome de arquivo informado ao compilador resolve a raiz para /opt/airflow;
@@ -132,10 +134,88 @@ Não foram repetidos os149 testes comportamentais da extração neste gate.
 No Windows sem Airflow, estes8 testes são explicitamente ignorados;
 isso não constitui aprovação de parsing.
 
-Nenhum resultado de
-runtime, Graph, estado persistido ou mounts do computador de João pode ser
-inferido a partir do parsing isolado. Commit desta entrega deve ser registrado
-externamente;109544e identifica a baseline, não esta implementação.
+### Resultados no ambiente Docker de João
 
-O passo07 só será submetido com o pacote real de outputs, diff, commit,
-branch/push/status e pendências. Não declara liberação08.
+Validações realizadas entre 15 e 16/10/2026, com saídas de terminal
+fornecidas por João. Não são resultados inferidos do ambiente isolado.
+
+| Verificação | Evidência recebida |
+|---|---|
+| Sincronização inicial | Fast-forward local de109544e para220014b, somente3 arquivos/542 inserções |
+| Saúde | postgres, airflow-webserver e airflow-scheduler healthy |
+| Versões no scheduler | Airflow2.9.2; Python3.10.14 |
+| Interface importável | /opt/airflow/scripts/weather_interface.py |
+| Arquivo da DAG | /opt/airflow/dags/weather_extract.py: True |
+| Cadastro | /opt/airflow/config/locations.json: True |
+| Diretório de dados | /opt/airflow/data: True |
+| DagBag e testes estruturais |8 testes executados, todos aprovados, em1.403s |
+| Import errors | Vazio; verificado pelo teste antes das asserções |
+| Pausa real | dags list retornou is_paused="True" |
+| Graph e agenda | Confirmados por João:3 nós sequenciais, agendaNone, DAG pausada |
+| Execuções criadas | João confirmou nenhuma execução criada |
+
+O teste de importabilidade/caminhos demonstra os caminhos visíveis no
+contêiner. Não equivale a nova auditoria completa das definições de mounts.
+Nenhuma função de extração foi chamada nessa inspeção.
+
+Saída do teste na imagem existente:
+
+```text
+Ran 8 tests in 1.403s
+OK
+```
+
+Avisos de depreciação de openlineage.client.run e openlineage.client.filter
+apareceram na serialização; não houve falha. Não foram alteradas dependências
+ou imagens para silenciá-los.
+
+Estado real recebido via dags list:
+
+```json
+[{"dag_id":"logistics_weather_extract","fileloc":"/opt/airflow/dags/weather_extract.py","owners":["airflow"],"is_paused":"True"}]
+```
+
+A lista comprova a pausa. A ausência de agenda foi comprovada separadamente
+pelos testes declarativos e pela confirmação da UI, pois não consta desse JSON.
+
+#### Correção do comando por stdin
+
+A primeira tentativa fornecida ao usuário usou exec com um dicionário de
+namespace separado. unittest.main consultou o módulo __main__ real e
+encontrou zero testes. O resultado "Ran 0 tests / OK" foi rejeitado como
+evidência. O comando desta documentação foi corrigido para usar globals()
+do módulo __main__, preservando __file__ para localizar a DAG real.
+A segunda tentativa executou efetivamente os8 testes e passou. Não houve
+alteração da DAG ou das tasks por causa dessa correção documental.
+
+#### Inspeção visual
+
+João confirmou explicitamente em16/10/2026:
+prepare_extraction → extract_batch → reconcile_extraction; schedule=None;
+DAG pausada e nenhuma execução criada.
+
+As capturas anexadas não ficaram acessíveis ao assistente. Registrar a
+evidência como **inspeção visual confirmada por João**, sem atribuir ao
+assistente leitura das imagens. Não foram copiadas capturas para o repositório.
+
+### Versionamento e limites do gate
+
+- Baseline do núcleo:109544e.
+- Implementação/testes/documentação inicial:220014ba4f448349d4d4d49091f0eac3ec577841,
+  branchmain, publicação remota e pull local confirmados.
+- Diff da implementação:3 arquivos,542 inserções; verificação de formatação
+  aprovada. Nenhuma mudança de núcleo, Docker ou PostgreSQL.
+- Esta atualização altera somente este documento; seu commit é identificado
+  externamente após a publicação.
+- A confirmação final de sincronização e árvore limpa no computador de João
+  será anexada ao relato antes de submetê-lo ao Planeamento.
+
+Nenhuma task, DAG run, coleta, replay de execução, agenda, SQL ou carga
+foi executada neste passo. O teste valida estrutura/importação, não o
+comportamento futuro das tasks. XCom em execução, reprocessamento, falhas,
+deadline14h15 e publicação14h30 continuam sem comprovação neste gate.
+Ressalvas dos passos anteriores permanecem registradas.
+
+Após a conferência Git, devolver o pacote como
+**Passo07 — EVIDÊNCIA SUBMETIDA**. Somente Planeamento e João podem
+registrar07 VALIDADO e liberar08. Passos08–11 continuam NÃO LIBERADOS.
