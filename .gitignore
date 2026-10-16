@@ -226,3 +226,5 @@ data/raw/
 !.env.example
 # Vinculo local ao workspace do Postman
 .postman/
+# Manifestos e auditoria local de execucao
+data/orchestration/

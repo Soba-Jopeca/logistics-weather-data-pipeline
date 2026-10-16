@@ -54,7 +54,7 @@ def locations():
 @pytest.fixture
 def config():
     return {
-        "endpoint": "https://example.invalid",
+        "endpoint": "https://api.open-meteo.com/v1/forecast",
         "timeout": (10, 30),
     }
 

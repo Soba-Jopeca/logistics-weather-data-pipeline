@@ -17,7 +17,7 @@ import requests
 from dotenv import load_dotenv
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = Path(__file__).parent.parent
 
 
 def required_env(name):
@@ -44,7 +44,10 @@ def parse_args():
 def load_locations():
     path = PROJECT_ROOT / "config" / "locations.json"
     locations = json.loads(path.read_text(encoding="utf-8-sig"))
+    return validate_locations(locations)
 
+
+def validate_locations(locations):
     if not isinstance(locations, list) or not locations:
         raise ValueError("O cadastro deve ser uma lista não vazia.")
 
@@ -108,48 +111,6 @@ def load_api_config():
         "endpoint": required_env("WEATHER_ENDPOINT"),
         "timeout": (10, 30),
     }
-
-
-    env_path = PROJECT_ROOT / ".env"
-
-    if env_path.is_file():
-        load_dotenv(
-            env_path,
-            encoding="utf-8-sig",
-            override=False,
-        )
-
-    city = required_env("WEATHER_CITY")
-    latitude = float(required_env("WEATHER_LATITUDE"))
-    longitude = float(required_env("WEATHER_LONGITUDE"))
-    hours = int(required_env("WEATHER_FORECAST_HOURS"))
-
-    if not -90 <= latitude <= 90:
-        raise ValueError("Latitude deve estar entre -90 e 90.")
-
-    if not -180 <= longitude <= 180:
-        raise ValueError("Longitude deve estar entre -180 e 180.")
-
-    if hours != 24:
-        raise ValueError(
-            "Nesta etapa, a previsão deve conter 24 passos horários."
-        )
-
-    endpoint = required_env("WEATHER_ENDPOINT")
-
-    params = {
-        "latitude": latitude,
-        "longitude": longitude,
-        "hourly": required_env("WEATHER_HOURLY"),
-        "timezone": required_env("WEATHER_TIMEZONE"),
-        "forecast_hours": hours,
-        "timeformat": "iso8601",
-        "temperature_unit": required_env("WEATHER_TEMPERATURE_UNIT"),
-        "wind_speed_unit": required_env("WEATHER_WIND_SPEED_UNIT"),
-        "precipitation_unit": required_env("WEATHER_PRECIPITATION_UNIT"),
-    }
-
-    return endpoint, city, params
 
 def build_request_params(location, window):
     if location["timezone"] != window["timezone"]:
@@ -299,13 +260,14 @@ def fetch_forecast_response(endpoint, params, timeout=(10, 30)):
     )
 
 
-def save_raw_bytes(raw_bytes, run_id):
+def save_raw_bytes(raw_bytes, run_id, *, project_root=None):
     # Validar o identificador antes de utilizá-lo no caminho.
     from uuid import UUID
 
     canonical_run_id = str(UUID(run_id))
 
-    raw_dir = PROJECT_ROOT / "data" / "raw"
+    root = Path(project_root) if project_root is not None else PROJECT_ROOT
+    raw_dir = root / "data" / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
 
     output_path = raw_dir / f"weather_{canonical_run_id}.json"
@@ -329,7 +291,7 @@ def save_raw_bytes(raw_bytes, run_id):
         raise OSError("Os bytes gravados diferem do conteúdo recebido.")
 
     return {
-        "raw_path": output_path.relative_to(PROJECT_ROOT).as_posix(),
+        "raw_path": output_path.relative_to(root).as_posix(),
         "raw_sha256": expected_hash,
     }
 
@@ -411,12 +373,13 @@ def fetch_with_retries(endpoint, params, timeout, run_id, max_attempts=3):
 
     return response, attempts
 
-def save_run_report(report):
+def save_run_report(report, *, project_root=None):
     from uuid import UUID
 
     run_id = str(UUID(report["run_id"]))
 
-    report_dir = PROJECT_ROOT / "data" / "raw" / "runs"
+    root = Path(project_root) if project_root is not None else PROJECT_ROOT
+    report_dir = root / "data" / "raw" / "runs"
     report_dir.mkdir(parents=True, exist_ok=True)
 
     output_path = report_dir / f"{run_id}.json"
@@ -442,7 +405,7 @@ def save_run_report(report):
     if output_path.read_bytes() != content:
         raise OSError("Falha na conferência do relatório gravado.")
 
-    return output_path.relative_to(PROJECT_ROOT).as_posix()
+    return output_path.relative_to(root).as_posix()
 
 def process_forecast(payload, window, collected_at, run_id, location_id):
     hourly = validate_payload_structure(payload)
@@ -472,7 +435,16 @@ def process_forecast(payload, window, collected_at, run_id, location_id):
 
     return records, validation
 
-def collect_location(config, location, cycle_date, batch_id, run_id=None):
+def collect_location(
+    config,
+    location,
+    cycle_date,
+    batch_id,
+    run_id=None,
+    *,
+    project_root=None,
+    request_params=None,
+):
     run_id = str(uuid4()) if run_id is None else run_id
     location_snapshot = deepcopy(location)
 
@@ -480,7 +452,20 @@ def collect_location(config, location, cycle_date, batch_id, run_id=None):
         cycle_date,
         location_snapshot["timezone"],
     )
-    params = build_request_params(location_snapshot, window)
+    expected_params = build_request_params(location_snapshot, window)
+
+    if request_params is None:
+        params = expected_params
+    else:
+        if (
+            not isinstance(request_params, dict)
+            or request_params != expected_params
+        ):
+            raise ValueError(
+                "Parâmetros fornecidos diferem do snapshot e do ciclo."
+            )
+
+        params = deepcopy(request_params)
 
     report = {
         "run_id": run_id,
@@ -524,7 +509,16 @@ def collect_location(config, location, cycle_date, batch_id, run_id=None):
         # Response pode existir mesmo quando o status HTTP indica erro.
         if response is not None:
             report["collected_at"] = last_attempt["ended_at"]
-            report.update(save_raw_bytes(response.content, run_id))
+            if project_root is None:
+                raw_reference = save_raw_bytes(response.content, run_id)
+            else:
+                raw_reference = save_raw_bytes(
+                    response.content,
+                    run_id,
+                    project_root=project_root,
+                )
+
+            report.update(raw_reference)
 
         if last_attempt["error_category"] is not None:
             report["error_category"] = last_attempt["error_category"]
@@ -559,7 +553,13 @@ def collect_location(config, location, cycle_date, batch_id, run_id=None):
         report["error_category"] = "persistence_error"
         report["error_message"] = type(error).__name__
 
-    report_path = save_run_report(report)
+    if project_root is None:
+        report_path = save_run_report(report)
+    else:
+        report_path = save_run_report(
+            report,
+            project_root=project_root,
+        )
 
     return {
         "report": report,
@@ -567,19 +567,99 @@ def collect_location(config, location, cycle_date, batch_id, run_id=None):
         "records": records,
     }
 
-def collect_batch(config, locations, cycle_date):
+def collect_batch(
+    config,
+    locations,
+    cycle_date,
+    *,
+    batch_id=None,
+    run_ids=None,
+    project_root=None,
+    request_params_by_location=None,
+):
+    from uuid import UUID
+
     if not locations:
         raise ValueError("A rodada precisa de pelo menos uma localidade.")
 
-    batch_id = str(uuid4())
-    started_at = datetime.now(timezone.utc).isoformat()
-
     config_snapshot = deepcopy(config)
     locations_snapshot = deepcopy(locations)
+
+    location_ids = [
+        location["location_id"]
+        for location in locations_snapshot
+    ]
+
+    if len(set(location_ids)) != len(location_ids):
+        raise ValueError("A rodada contém localidades duplicadas.")
+
+    batch_id = (
+        str(uuid4())
+        if batch_id is None
+        else str(UUID(batch_id))
+    )
+
+    if run_ids is None:
+        frozen_run_ids = {
+            location_id: str(uuid4())
+            for location_id in location_ids
+        }
+    else:
+        if not isinstance(run_ids, dict):
+            raise ValueError("run_ids deve ser um mapa por localidade.")
+
+        if set(run_ids) != set(location_ids):
+            raise ValueError(
+                "run_ids deve identificar exatamente as localidades da rodada."
+            )
+
+        frozen_run_ids = {
+            location_id: str(UUID(run_ids[location_id]))
+            for location_id in location_ids
+        }
+
+    if len(set(frozen_run_ids.values())) != len(location_ids):
+        raise ValueError("Cada localidade deve possuir um run_id distinto.")
+
+    frozen_request_params = None
+
+    if request_params_by_location is not None:
+        if (
+            not isinstance(request_params_by_location, dict)
+            or set(request_params_by_location) != set(location_ids)
+        ):
+            raise ValueError(
+                "Parâmetros devem identificar exatamente as localidades."
+            )
+
+        frozen_request_params = deepcopy(request_params_by_location)
+
+        for location in locations_snapshot:
+            window = build_cycle_window(
+                cycle_date,
+                location["timezone"],
+            )
+            expected = build_request_params(location, window)
+
+            if frozen_request_params[location["location_id"]] != expected:
+                raise ValueError(
+                    "Parâmetros da rodada divergem do cadastro e do ciclo."
+                )
+
+    started_at = datetime.now(timezone.utc).isoformat()
     results = []
 
     for location in locations_snapshot:
-        run_id = str(uuid4())
+        run_id = frozen_run_ids[location["location_id"]]
+
+        options = {"run_id": run_id}
+        if frozen_request_params is not None:
+            options["request_params"] = frozen_request_params[
+                location["location_id"]
+            ]
+
+        if project_root is not None:
+            options["project_root"] = project_root
 
         try:
             result = collect_location(
@@ -587,7 +667,7 @@ def collect_batch(config, locations, cycle_date):
                 location,
                 cycle_date,
                 batch_id,
-                run_id=run_id,
+                **options,
             )
             results.append(result)
 
@@ -629,12 +709,13 @@ def collect_batch(config, locations, cycle_date):
         "results": results,
     }
 
-def save_batch_report(batch):
+def save_batch_report(batch, *, project_root=None):
     from uuid import UUID
 
     batch_id = str(UUID(batch["batch_id"]))
 
-    report_dir = PROJECT_ROOT / "data" / "raw" / "batches"
+    root = Path(project_root) if project_root is not None else PROJECT_ROOT
+    report_dir = root / "data" / "raw" / "batches"
     report_dir.mkdir(parents=True, exist_ok=True)
 
     output_path = report_dir / f"{batch_id}.json"
@@ -676,51 +757,48 @@ def save_batch_report(batch):
     if output_path.read_bytes() != content:
         raise OSError("Falha na conferência do resumo da rodada.")
 
-    return output_path.relative_to(PROJECT_ROOT).as_posix()
+    return output_path.relative_to(root).as_posix()
 
 def main():
+    from scripts.weather_interface import (
+        execute_extraction,
+        prepare_extraction,
+    )
+
     args = parse_args()
     config = load_api_config()
     locations = load_locations()
 
-    batch = collect_batch(
-        config,
-        locations,
-        args.cycle_date,
+    reference = prepare_extraction(
+        cycle_date=args.cycle_date,
+        config=config,
+        locations=locations,
+        project_root=PROJECT_ROOT,
     )
 
-    report_path = save_batch_report(batch)
+    result = execute_extraction(
+        manifest_path=reference["manifest_path"],
+        manifest_sha256=reference["manifest_sha256"],
+        project_root=PROJECT_ROOT,
+    )
 
-    print("Batch:", batch["batch_id"])
-    print("Ciclo:", batch["cycle_date_local"])
-    print("Status:", batch["batch_status"])
+    print("Batch:", result["batch_id"])
+    print("Ciclo:", result["cycle_date"])
+    print("Modo:", result["mode"])
+    print("Status:", result["batch_status"])
     print(
         "Localidades validadas:",
-        batch["successful_location_count"],
+        result["successful_location_count"],
         "/",
-        batch["location_count"],
+        result["location_count"],
     )
+    print("Registros:", result["record_count"])
+    print("Nulos:", result["null_count"])
+    print("Manifesto:", PROJECT_ROOT / result["manifest_path"])
+    print("Resumo salvo:", PROJECT_ROOT / result["batch_report_path"])
+    print("Conclusão:", PROJECT_ROOT / result["completion_path"])
 
-    for result in batch["results"]:
-        report = result["report"]
-
-        print(
-            report["location_id"],
-            "|",
-            report["run_status"],
-            "| registros:",
-            len(result["records"]),
-        )
-
-        if report.get("error_category"):
-            print("  Erro:", report["error_category"])
-
-    print("Resumo salvo:", PROJECT_ROOT / report_path)
-
-    if batch["batch_status"] != "success":
-        return 1
-
-    return 0
+    return 0 if result["batch_status"] == "success" else 1
 if __name__ == "__main__":
     try:
         sys.exit(main())
