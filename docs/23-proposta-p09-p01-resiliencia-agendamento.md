@@ -4,20 +4,33 @@
 
 - Projeto: Logistics Weather Data Pipeline.
 - Checkpoint: CP-2026-10-13 v2.
-- Identificação: AF-CPv2-P09-P01-v0.1.
+- Identificação: AF-CPv2-P09-P01-v0.2.
 - Data desta versão documental: 17/10/2026, America/Sao_Paulo.
 - Proposta inicialmente apresentada em chat: 16/10/2026.
 - Destino: Planeamento central e João.
 - Responsável pela proposta: Airflow — Seção 4.
 - Baseline operacional analisada: `770a7a1f01440bb96443b8cde645b65b8164ea86`.
 - Evidência de P08-R03: `docs/22-evidencias-p08-r03-execucao-manual.md`, commit `011d01b2283ac89573aa36b23d30b350b81a79c0`.
-- Estado: **P09-P01 — PROPOSTA TÉCNICA SUBMETIDA; revisão e decisões arquiteturais pendentes**.
+- Estado: **P09-P01 v0.2 — REVISÃO DOCUMENTAL SUBMETIDA; diff aprovado por João para publicação exclusivamente documental**.
+- Base documental desta revisão: commit `0160d54e767b52cc3699c3fef109f7a6a729cadc` (v0.1).
 
 O Planeamento central, com ratificação expressa de João, validou o passo 08 com limitações e liberou o passo 09 exclusivamente para planeamento, diagnóstico e proposta. João autorizou expressamente a criação deste documento. Essa autorização documental não libera implementação ou execução de testes.
 
 Passos 01–02 e 05–07 validados; 03–04 validados com ressalvas; 08 validado com limitações. Passo 09 não validado. Passos 10–11 não liberados.
 
-O parecer preliminar central considerou a proposta alinhada ao escopo, mas apontou decisões arquiteturais pendentes. A revisão anterior utilizou a síntese disponível, sem auditoria integral de documento publicado. Esta versão fornece o texto consolidado para essa revisão, sem tratar as recomendações como decisões aprovadas.
+A v0.1 foi publicada após autorização documental. Em novo encaminhamento, o Planeamento informou que João aprovou priorizar uma coleta diária para apoiar a decisão logística das 14h30, excluindo a cadência de duas horas do MVP. A autorização desta v0.2 limita-se à consolidação documental e exige apresentar o diff a João antes da publicação.
+
+### 1.1 Registro das decisões e hipóteses
+
+| Classificação | Conteúdo | Consequência |
+|---|---|---|
+| Direção aprovada | Uma coleta principal diária para a decisão logística das 14h30 | MVP orientado a essa finalidade, sem atualização contínua |
+| Regra arquitetural aprovada | D pela data local do slot nominal em America/Sao_Paulo; janela [D 16h, D+2 00h) preservada | Não selecionar D pelo relógio de cada task |
+| Restrição aprovada | Não adotar `0 */2 * * *` no MVP | Atualizações extraordinárias ficam para evolução posterior |
+| Hipóteses iniciais aceitas para desenho | Coleta 13h45, corte 14h15, disponibilização pretendida 14h30 | Não são agenda ativada, deadline implementado ou SLA comprovado |
+| Ainda aberto | Timetable, atraso, unicidade de slot, reação no corte, frescor, fallback e autorização T01 | Nenhum mecanismo correspondente está implementado por esta revisão |
+
+A aprovação de uma orientação de negócio não equivale à aprovação da implementação das hipóteses operacionais.
 
 ## 2. Limites desta entrega
 
@@ -135,6 +148,48 @@ Falha no bloqueio de rede ou escrita fora da raiz temporária interrompe o pacot
 
 F05 simula interrupção de processo. Não comprova durabilidade diante de queda de energia, falha física de disco ou semântica de outro filesystem.
 
+### 6.2 Detalhamento de replay e integridade
+
+F06 deverá construir um resultado sintético final usando transporte simulado e a interface existente. Depois, registrar todos os caminhos, bytes/hashes, batch/run/attempt IDs e contagem de transporte. Invocar novamente execute_extraction com o mesmo manifesto e hash deve produzir mode=replay, metadados equivalentes e zero incremento no contador HTTP. Todos os arquivos devem permanecer idênticos, sem novo incidente.
+
+F07 repete a conferência com resultado parcial tecnicamente concluído. A interface deve preservar partial_success; não preencher lacunas nem recolher cidades. O teste offline não declara um estado Airflow: a reprovação da task de reconciliação pertence a futura integração E3. Verifica-se aqui o status parcial e a coerência dos artefatos pelo núcleo.
+
+F08 possui duas variantes separadas: started sem completed; artefato esperado existente sem started/completed. A tentativa de execução deve bloquear antes do transporte. Permite-se somente novo incidente de auditoria quando gravável; nenhum arquivo preexistente pode ser alterado.
+
+F09 possui três variantes: Raw, relatório individual e completed alterados separadamente em fixtures. Comparar antes/depois da tentativa, tomando como referência de preservação o estado já adulterado pela simulação. O código não deve restaurar automaticamente a fixture nem substituir o resultado por nova coleta.
+
+F10 separa hash informado incorreto de bytes do manifesto alterados mantendo o hash antigo. Em ambos, exigir zero HTTP e ausência de nova marca de início. O incidente pode não conhecer batch_id quando a integridade falha antes de confiar no manifesto.
+
+F11, em E1, usa somente verificadores Python existentes para comprovar rejeição de resumo, relatório ou conclusão inconsistentes. Não extrair nem executar o corpo da task para ampliar artificialmente essa evidência. O estado real da task permanece fora de T01.
+
+### 6.3 Detalhamento de interrupção e persistência
+
+F04 injeta falha de persistência após a gravação do Raw e antes do relatório. Conferir a causa primária, os arquivos que efetivamente chegaram ao disco e a ausência de conclusão íntegra. Uma nova tentativa na mesma fixture não deve iniciar outra coleta.
+
+F05 terá dois pontos de interrupção determinísticos em subprocesso descartável:
+
+1. Depois de persistir started.json e antes do primeiro acesso ao transporte.
+2. Depois de persistir o Raw de uma cidade e antes de completed.json.
+
+Usar sinalização de prontidão entre processo filho e controlador, com espera máxima definida no teste; não depender de sleep arbitrário para adivinhar a posição da falha. O ponto de parada será instrumentado apenas no processo de teste, sem hook permanente no código de produção.
+
+O controlador encerra somente o filho identificado, aguarda sua saída e verifica que não sobrou processo. Um novo processo de inspeção usa a mesma raiz temporária e barreira de rede: execute_extraction deve bloquear por estado ambíguo, preservando IDs e arquivos existentes; novo incidente é permitido. O contador externo ao processo ou registro de teste deve demonstrar zero transporte adicional nessa tentativa.
+
+A fixture deve ter raiz própria e não herdar credenciais/configuração operacional. Se não for possível estabelecer essas barreiras com os recursos existentes, interromper e devolver uma proposta de ajuste; não mudar Compose ou instalar dependências silenciosamente.
+
+### 6.4 Baseline observada versus mecanismos futuros
+
+| Aspecto | Aceite da baseline no teste offline | Fora do aceite T01 |
+|---|---|---|
+| Replay | Mesmo manifesto/contexto íntegro não coleta de novo | Reutilização entre novos Airflow run IDs |
+| Ambiguidade | Início sem conclusão bloqueia | Recuperação automática, retomada de cidade ou exclusão de marca |
+| Identidades F12 | Mesmo contexto conserva IDs; contexto distinto cria outra identidade | Unicidade global do slot, inclusive contra CLI |
+| Integridade | Verificadores rejeitam inconsistências e preservam artefatos | Reparo, migração ou mudança de contrato |
+| Reconciliação | Núcleo rejeita artefatos incoerentes; parcialidade permanece visível | Estado de task/DAG, cancelamento ou retries Airflow |
+| Temporalidade | Janela e cobertura atuais podem ser testadas com datas sintéticas | Novo resolvedor de agenda, bloqueio 14h15 e política de retomada |
+
+F12 passa quando caracteriza corretamente a identidade existente, mesmo evidenciando que dois contextos distintos podem representar o mesmo slot nominal. Isso não aprova a lacuna para ativação da agenda: o mecanismo de unicidade continua bloqueador arquitetural separado.
+
 ## 7. Retries HTTP e retries Airflow
 
 ### 7.1 Estado existente
@@ -155,82 +210,79 @@ O núcleo deve retornar replay quando houver conclusão íntegra e bloquear esta
 
 Não prometer recuperação automática de batches parciais. Se uma recolha for necessária, deverá ser uma nova rodada autorizada, preservando a origem e os resultados anteriores.
 
-## 8. Política temporal proposta
+## 8. Política temporal diária
 
-Esta seção descreve desenho futuro, não implementado.
+Esta seção distingue regra de negócio aprovada de mecanismos ainda propostos. A DAG existente continua manual, pausada e com schedule=None.
 
-### 8.1 Relação entre intervalo, slot e ciclo
+### 8.1 Slot, intervalo e ciclo
 
-Recomendação: usar o comportamento de cron baseado em intervalos, explicitamente validado no Airflow 2.9.2.
+Slot principal hipotético: D às 13h45 em America/Sao_Paulo. D é a data local do slot nominal, conforme direção aprovada. A janela meteorológica continua [D 16h, D+2 00h), normalmente 32 horas; não confundir duração do intervalo Airflow com janela de previsão.
 
-| Elemento | Semântica proposta |
+| Elemento | Semântica no desenho |
 |---|---|
-| logical_date | Início do intervalo Airflow; não é o instante real da coleta |
-| data_interval_start | Limite inicial do intervalo da orquestração |
-| data_interval_end | Limite final do intervalo e referência do slot nominal |
-| scheduled_slot | Instante nominal de data_interval_end, interpretado em America/Sao_Paulo |
-| cycle_date D | Data local de scheduled_slot para runs agendadas |
-| collected_at | Instante real da resposta; usado para cobertura e frescor |
+| logical_date | Determinada pela timetable; não é o relógio da coleta |
+| data_interval_start/end | Intervalo Airflow da timetable escolhida |
+| scheduled_slot | Instante nominal D 13h45, com timezone, normalizável em UTC |
+| cycle_date D | Data local desse slot |
+| collected_at | Instante real de cada resposta; usado na cobertura e no frescor |
 
-O slot é um instante com timezone, não uma hora sem data. Persistir representação ISO com offset e normalizar a identidade por instante UTC evita ambiguidades. Não assumir offset -03 fixo como regra geral: usar America/Sao_Paulo.
+O instante hipotético da coleta é 2h15 antes do início da janela; a disponibilização pretendida é 1h30 antes. Isso dá finalidade à previsão, sem garantir que os dados chegarão completos.
 
-Para run manual, cycle_date continua explícito. Não inferir seu ciclo a partir do data_interval manual. Runs manuais não devem assumir silenciosamente a identidade de um slot agendado.
+Para runs manuais, cycle_date continua explícito e não deve ser inferido do intervalo manual. Elas não consomem silenciosamente um slot agendado.
 
-### 8.2 Exemplos da política recomendada
+### 8.2 Alternativas de timetable — decisão pendente
 
-| Intervalo local Airflow | Slot nominal | D proposto |
+| Alternativa | Semântica | Retomada |
 |---|---|---|
-| 16/10 22h → 17/10 00h | 17/10 00h | 17/10 |
-| 17/10 12h → 14h | 17/10 14h | 17/10 |
-| Slot de 17/10 14h executado com atraso | Continua 17/10 14h | Continua 17/10 |
+| CronDataIntervalTimetable diária | Intervalo entre duas ocorrências de 13h45; logical_date no início, slot no fim | Pode haver run do último intervalo ao reativar com catchup=False |
+| CronTriggerTimetable diária, sem intervalo adicional | Disparo no instante nominal, intervalo pontual | Tende a aguardar o próximo disparo; pode perder o slot do dia se o scheduler voltar depois dele |
 
-Atraso não muda ciclo silenciosamente. Se a run ultrapassar a tolerância aprovada, deverá ser rejeitada para nova coleta ou tratada pela política explicitamente autorizada.
+Recomendação para revisão: explicitar CronDataIntervalTimetable diária e usar data_interval_end como slot, combinada com elegibilidade de atraso/corte antes de permitir HTTP. É uma recomendação, não escolha ratificada. Não ativar agenda sem esse controle e sem unicidade por slot.
 
-A janela meteorológica permanece [D 16h, D+2 00h). Os intervalos de duas horas do Airflow não substituem essa janela.
+Expressão diária candidata para o horário hipotético: `45 13 * * *`. É apenas especificação documental, não alteração do schedule.
 
-O ciclo não é recalculado pelo relógio de cada task. A preparação resolve o contexto uma vez; tasks seguintes usam as referências persistidas.
+### 8.3 Virada do dia
 
-### 8.3 Elegibilidade temporal
+Exemplo com timetable de intervalo: [16/10 13h45, 17/10 13h45) tem slot em 17/10 e D=17/10, embora logical_date pertença ao dia 16.
 
-Antes de uma futura coleta agendada:
+Se esse slot só chegar à preparação após a meia-noite, ele continua sendo do dia 17; não recalcular D para o dia 18. A elegibilidade deve rejeitar a coleta atrasada para a finalidade diária e registrar indisponibilidade/tardio conforme política futura, sem criar outro ciclo automaticamente.
 
-1. Resolver slot e D de modo determinístico.
-2. Conferir janela dentro do horizonte documentado do endpoint.
-3. Exigir pelo menos um horário futuro exigível no instante efetivo da coleta.
-4. Verificar contexto/slot e ausência de conflito conhecido com coleta externa.
-5. Conferir estado persistido compatível com nova execução ou replay.
-6. Aplicar tolerância de atraso e regra de corte que venham a ser aprovadas.
+Usar America/Sao_Paulo, sem codificar offset fixo. Persistir instantes com timezone e preservar os campos dos manifestos históricos.
 
-A cobertura é medida novamente após a resposta. A requisição da janela completa não garante que todos os horários serão retornados.
+### 8.4 Elegibilidade futura
 
-O código atual exige horários da janela que sejam maiores ou iguais ao instante collected_at. Assim, uma coleta às 18h07 passa a exigir a hora das 19h em diante. Quantidade recebida e quantidade exigível são medidas distintas.
+Antes de HTTP, resolver e congelar slot/D; validar atraso/corte, unicidade, estado persistido, horizonte da fonte e conflito conhecido com CLI. Revalidar elegibilidade junto ao início efetivo do transporte: aprovação na preparação não elimina atraso posterior em fila. O controle exato é implementação futura sujeita a aprovação.
 
-A Open-Meteo documenta horizonte padrão de sete dias e extensão até 16 dias. Horizonte documentado não equivale a garantia de disponibilidade, completude ou aptidão de cada resposta. Eventual recuperação histórica exige verificar produto e contrato de fonte; não tratar o endpoint de previsão como backfill irrestrito.
+A janela deve estar dentro do horizonte do endpoint e ter horários exigíveis. Após a resposta, medir novamente cobertura e qualidade. Uma resposta recebida após o corte deve ser classificada pela política de resultado tardio, sem reescrever os bytes Raw.
 
-## 9. Cadência candidata e catchup
+O código atual exige horários da janela maiores ou iguais a collected_at; às 18h07, a exigência começa às 19h. Isso não habilita uso de uma coleta tardia para a decisão das 14h30.
 
-### 9.1 Avaliação de 0 */2 * * *
+A documentação da Open-Meteo consultada na v0.1 indica sete dias por padrão e extensão até 16 dias. Confirmar a elegibilidade do ciclo na data do futuro ensaio. Não usar o endpoint de previsão como backfill irrestrito.
 
-No timezone da DAG, a cadência representa 12 slots diários, às 00h, 02h, ..., 22h.
+## 9. Cadência do MVP e retomada do scheduler
 
-Com cinco solicitações individuais por rodada: até 60 tentativas iniciais por dia; até 180 tentativas HTTP se todas consumirem três tentativas em cada slot. São estimativas do desenho atual, não medição ou garantia de quota. Nenhuma coleta adicional CLI está incluída nesses números.
+### 9.1 Decisão de negócio
 
-Dois objetivos precisam ser distinguidos:
+Uma coleta principal diária para a decisão das 14h30. Não adotar `0 */2 * * *` no MVP. Atualizações extraordinárias pertencem a evolução posterior e exigem autorização própria.
 
-- Atualização durante todo o dia: 12 slots; após as 16h a cobertura futura exigível diminui.
-- Preparação de decisão diária às 14h30: slots de 16h a 22h não contribuem para essa decisão do mesmo dia. Uma janela de slots restrita pode ser mais coerente e econômica.
+Estimativa de uma rodada diária: cinco tentativas iniciais, até 15 tentativas HTTP se todas as cidades consumirem três tentativas. Não inclui qualquer execução manual extraordinária e não constitui garantia de quota ou prazo.
 
-Recomendação: decidir primeiro a finalidade da cadência. Não ativar o cron candidato apenas para demonstrar agendamento.
+Manter, enquanto não houver decisão específica, retries Airflow=0, catchup=False, max_active_runs=1 e max_active_tasks=1. Nenhum desses controles implementa corte ou unicidade de negócio.
 
-### 9.2 catchup e concorrência
+### 9.2 Casos de retomada a decidir antes da agenda
 
-Manter catchup=False, max_active_runs=1 e max_active_tasks=1.
+| Situação | Comportamento futuro recomendado |
+|---|---|
+| Scheduler disponível antes de 13h45 | Aguardar o slot e criar a run nominal |
+| Retorno após 13h45, antes do corte | Admitir no máximo o slot vigente, somente se tolerância aprovada, unicidade e tempo disponível permitirem |
+| Retorno em ou após 14h15 | Não iniciar coleta para a decisão diária desse slot |
+| Retorno no dia seguinte | Não recolher automaticamente o slot perdido nem transformar o ciclo antigo no atual |
+| Batch do slot já concluído | Verificar/reutilizar resultado conforme mecanismo aprovado, sem novo HTTP |
+| Batch iniciado sem conclusão | Bloquear e investigar; não apagar marca nem gerar outra identidade para contornar bloqueio |
 
-catchup=False não elimina toda possibilidade de run imediata ao reativar uma DAG baseada em intervalos. O cron convencional utiliza CronDataIntervalTimetable; CronTriggerTimetable tem semântica distinta de intervalo e retomada. Não trocar timetables sem revisar a política de slot.
+catchup=False evita recuperar toda a série, mas não basta para decidir se uma run criada na retomada ainda é útil ao negócio. A timetable e a elegibilidade deverão ser verificadas por simulação estática antes de qualquer ensaio de scheduler.
 
-max_active_runs=1 serializa esta DAG, mas não garante frescor nem unicidade entre coletas sequenciais ou processos externos. Atrasos em fila devem passar pela elegibilidade temporal.
-
-Proposta para discussão: tolerância inicial de 15 minutos após o slot nominal. Não aprovada. Na finalidade diária, o corte deve prevalecer: um slot das 14h não ganha permissão para começar às 14h15 por causa dessa tolerância.
+O comportamento desejado da tabela é requisito futuro. A baseline não possui esses controles e não poderá recebê-los como consequência implícita de T01.
 
 ## 10. Duplicação, replay e controle de slot
 
@@ -238,7 +290,7 @@ Proposta para discussão: tolerância inicial de 15 minutos após o slot nominal
 
 - Mesmo contexto concluído e íntegro: replay.
 - Mesmo contexto iniciado sem conclusão: bloqueio.
-- Slot diferente do mesmo ciclo: possível atualização intencional, com novo batch.
+- No MVP diário, apenas o slot principal é previsto. Atualização extraordinária não é autorizada por representar outro slot; pertence à evolução posterior.
 - Outro Airflow run_id para slot já utilizado: não deve iniciar nova coleta automaticamente.
 - Nova rodada manual: exige autorização e vínculo de origem quando aplicável; não é replay apenas por usar o mesmo D.
 
@@ -252,25 +304,45 @@ Pesquisar arquivos e depois gravar não basta: existe janela de corrida. Deve-se
 
 Não se escolhe nesta versão um novo schema, caminho de índice, migração ou banco. A implementação depende de decisão central. max_active_runs e o agendador não substituem a política para runs manuais ou coleta CLI.
 
-## 11. Corte, publicação, frescor e fallback
+## 11. Atrasos, corte, frescor e fallback
 
-Requisitos a analisar, ainda não implementados:
+Os horários 13h45, 14h15 e 14h30 são hipóteses iniciais para desenho. Não representam execução ativada, publicação implementada ou SLA comprovado.
 
-- Corte operacional às 14h15 de São Paulo.
-- Eventual publicação às 14h30.
-- Elegibilidade de batches atrasados, incompletos ou com nulos.
-- Frescor máximo aceitável.
-- Fallback e sua rastreabilidade.
+### 11.1 Alternativas para atraso
 
-Recomendação preliminar para a finalidade diária: nenhuma nova coleta começa em ou após 14h15. É necessário decidir o que ocorre com uma execução já iniciada quando o corte chega: cancelamento controlado, conclusão apenas para diagnóstico ou preservação do resultado como tardio. Não assumir que pause interrompe uma task em andamento.
+| Alternativa | Vantagem | Limite |
+|---|---|---|
+| A — Tolerância de 15 minutos, até 14h00 inclusive, e corte prevalente | Reserva margem antes de 14h15; recomendação inicial | Pode recusar uma execução ainda útil; não garante conclusão |
+| B — Iniciar enquanto houver orçamento calculado antes de 14h15 | Maior flexibilidade | Exige orçamento fim a fim demonstrado; timeout de leitura não basta |
+| C — Perdeu 13h45, não coletar automaticamente | Regra simples e previsível | Menor disponibilidade após falha breve do scheduler |
 
-A publicação exigirá selecionar batch íntegro, elegível, fresco e com qualidade aprovada. Não existe implementação de publicação nesta fase; não será adicionada task placeholder.
+Recomendação para ratificação: A, sem tentar medir sucesso apenas pelo tempo observado em R03. Em todos os casos, não iniciar em ou após 14h15. Tolerância e fronteiras exatas ainda dependem de João.
 
-Fallback requer idade máxima, cobertura mínima, política de nulos, finalidade permitida e identificação explícita do batch de origem. Sem critérios aprovados, registrar indisponibilidade; não substituir dados silenciosamente.
+### 11.2 Execução em andamento no corte
 
-Frescor de collected_at mede tempo desde a coleta por cidade. Não comprova a idade da previsão do modelo meteorológico. A regra de agregação entre cidades também precisa ser aprovada.
+| Alternativa | Implicação |
+|---|---|
+| Cancelar no corte | Pode deixar started sem completed; exige controle real de processos e tratamento da ambiguidade |
+| Deixar concluir, marcando resultado como tardio e inelegível à decisão diária | Preserva rastreabilidade; não garante interrupção do consumo de recursos |
+| Aceitar conclusão até outro limite | Muda o significado de 14h15 e exige nova decisão explícita |
 
-Timeout HTTP (10,30), execution_timeout e dagrun_timeout não são garantia de deadline absoluto das 14h15. A run de cerca de oito segundos de P08-R03 não comprova SLA. Nenhuma garantia de corte, publicação ou fallback é declarada nesta proposta.
+Recomenda-se, para o desenho inicial, a segunda alternativa: preservar o resultado e excluí-lo do aceite da decisão diária quando tardio. Não afirmar que isso está implementado nem que atende a um requisito de parada absoluta. Se o negócio exigir interrupção às 14h15, será necessário outro desenho aprovado. Pause da DAG não deve ser tratado como cancelamento de tasks em andamento.
+
+### 11.3 Frescor e qualidade
+
+Frescor mede idade da coleta; não comprova idade da rodada do modelo meteorológico. Proposta para discussão: avaliar a idade mais antiga entre as cinco cidades no instante de decisão, mantendo também todas as idades individuais.
+
+Limite de 45 minutos às 14h30 é uma hipótese candidata coerente com coleta às 13h45, mas sujeito a latência e confirmação do negócio. Alternativa: limite maior explicitamente aprovado. Não transformar essa hipótese em regra de teste ou implementação antes da ratificação.
+
+Elegibilidade analítica deverá exigir ciclo/janela corretos, cinco localidades, integridade, cobertura e política de nulos aprovada. success/validated_with_nulls não bastam. Incomplete ou dados fora do prazo não devem ser promovidos por um resumo positivo.
+
+### 11.4 Fallback
+
+Recomendação MVP: registrar indisponibilidade explícita quando não houver batch elegível; sem substituição automática.
+
+Alternativa futura: batch anterior somente se cobrir integralmente a janela do ciclo atual, respeitar idade e qualidade aprovadas e indicar claramente sua origem. Um batch de D-1 normalmente não cobre a janela completa de D; não pode ser fallback apenas por ser o mais recente.
+
+Disponibilização pretendida às 14h30 continua requisito de negócio, sem task de publicação, warehouse ou placeholder nesta fase. Timeout (10,30), execution_timeout e dagrun_timeout não são deadline absoluto. Nenhuma garantia de publicação, frescor ou fallback é declarada como implementada.
 
 ## 12. Impactos e alterações potenciais
 
@@ -286,23 +358,64 @@ Timeout HTTP (10,30), execution_timeout e dagrun_timeout não são garantia de d
 
 Não se propõe alterar silenciosamente R3/DQ, Raw/run/batch, assinaturas existentes ou snapshots. Qualquer necessidade identificada pelos testes exige diff e nova avaliação.
 
-## 13. Plano de validação e ordem recomendada
+## 13. Proposta fechada para P09-T01 — offline
 
-1. Revisar esta versão integral e ratificar as decisões arquiteturais necessárias.
-2. Emitir autorização específica de implementação dos testes isolados, com arquivos e ambientes permitidos.
-3. Inventariar testes existentes e mapear cobertura para evitar duplicação.
-4. Executar inicialmente F06, F08–F10 e F12: replay, bloqueios, integridade e identidades.
-5. Executar F01–F03 e F07: transporte, retries HTTP, incompletude e parcialidade.
-6. Executar F04–F05: persistência e interrupção.
-7. Executar F11 e testes temporais sintéticos, sem task execution.
-8. Repetir regressão afetada e validação estrutural apropriada, sob o gate autorizado.
-9. Submeter resultados, diferenças, incidentes e limitações ao Planeamento.
-10. Somente após aprovação, propor E3 com número exato de runs, fixtures, contenção e autorização operacional própria.
-11. Ensaiar agenda somente depois dos testes de falhas/replay e mediante autorização separada.
+**Estado: proposta de escopo; P09-T01 NÃO LIBERADO.** A aprovação da v0.2 não libera automaticamente sua execução.
 
-Testes temporais propostos: meia-noite, conversão UTC/IANA, atraso que cruza o dia, limite da tolerância, 14h14m59s/14h15/14h15m01s, coleta antes/depois das 16h, janela sem horários exigíveis, slot duplicado, pausa/reativação e histórico sem catchup.
+### 13.1 Objetivo e fronteira
 
-Esses testes verificam a política aprovada; não devem implementar decisões ainda abertas apenas para obter aprovação na suíte.
+Caracterizar e verificar a baseline operacional 770a7a1 usando F01–F12 no núcleo Python, respeitando as limitações da seção 6.4. Não desenvolver mecanismos futuros para fazer um teste passar.
+
+Arquivos candidatos, sujeitos à autorização específica:
+
+- tests/test_weather_resilience_offline.py: cenários E1.
+- tests/test_weather_interruption.py: controlador e cenários E2.
+- tests/helpers/weather_resilience.py e eventual __init__.py: fixtures e barreiras locais, se necessários.
+- docs/24-evidencias-p09-t01-offline.md: matriz de resultados e limitações.
+
+Reutilizar fixtures/testes existentes quando adequados; alterações em outros arquivos de teste precisam constar do diff proposto ao Planeamento. Código de produção, DAG, Compose e dependências ficam fora do pacote.
+
+Não incluir novo resolvedor temporal, índice/claim por slot, política de corte, implementação de fallback, alteração de retries ou semântica de contrato.
+
+### 13.2 Ambiente e isolamento
+
+E1/E2 sem serviços Airflow operacionais e sem banco. Preferir contêiner descartável com a imagem existente, rede desativada, scripts/config/testes somente para leitura, sem .env, sem data/logs reais, sem socket Docker montado. Fixture e evidências de teste ficam em diretório temporário próprio.
+
+Usar Python 3.10.14 como alvo de compatibilidade; execução Windows pode complementar, mas não substitui esse alvo. Usar dependências já disponíveis ou procedimento offline previamente aprovado. Ausência de dependência interrompe a execução para revisão, sem instalar ou mudar imagem por iniciativa própria.
+
+Não reconstruir a imagem nem recriar os serviços. O encerramento F05 atinge somente subprocessos do contêiner descartável, nunca scheduler/webserver.
+
+### 13.3 Casos incluídos e ordem
+
+1. Inventário de testes existentes e mapeamento para F01–F12.
+2. F06 íntegro; F08 nas duas variantes; F09 nos três tipos de artefato; F10 nas duas variantes; F12 nos dois contextos.
+3. F01 timeout e conexão; F02 sequência transitória; F03 horário exigível removido; F07 parcial concluído.
+4. F04 falha entre Raw e relatório; F05 nos dois pontos de interrupção definidos.
+5. F11 pelos verificadores puros; sem executar a task Airflow.
+6. Regressão Python afetada com rede bloqueada; sem suíte estrutural que inicialize Airflow/metadados operacionalmente.
+
+Datas sintéticas podem comprovar build_cycle_window/evaluate_coverage existentes. Simulação de timetable, retomada de scheduler, resolvedor D/slot, tolerância e deadline ficam para pacote temporal separado; não testar como implementada uma política ausente.
+
+### 13.4 Aceite e evidências
+
+- Casos mapeados individualmente, sem skips silenciosos.
+- Zero chamadas HTTP reais; chamadas simuladas contadas.
+- Replay íntegro sem qualquer arquivo novo ou mutação.
+- Bloqueio de estados ambíguos sem novo HTTP; incidentes permitidos conforme cenário.
+- IDs e bytes históricos da fixture preservados.
+- Interrupção determinística, processo filho encerrado e ausência de processos residuais.
+- Resultados de parcialidade não promovidos.
+- Limitação F11 claramente registrada: não prova estado de task/DAG.
+- Limitação F12 claramente registrada: não prova unicidade de slot.
+- Diff restrito aos arquivos autorizados; git diff --check e revisão documental.
+- Comandos efetivos, versões, códigos de saída, contagens por cenário, hashes/inventários e falhas apresentados.
+- Falha inesperada interrompe avanço: documentar e devolver ao Planeamento, sem corrigir produção ou ampliar cenários silenciosamente.
+
+Ao término, submeter P09-T01 — EVIDÊNCIA SUBMETIDA para avaliação central. Não declarar passo 09 validado nem avançar a integração/agenda.
+
+### 13.5 Etapas posteriores, fora de T01
+
+Após T01: resolver questões arquiteturais, especificar mecanismo de slot e temporalidade, aprovar diff de implementação e testes temporais. Só depois, propor E3 com ambiente, quantidade exata de runs, contenção e gate próprio. Ensaio de agenda permanece dependente de autorização separada e dos pré-requisitos de resiliência.
 
 ## 14. Rollback e preservação
 
@@ -314,22 +427,22 @@ Para futuro ensaio de agenda: plano próprio deve prever pausa final, conferênc
 
 Qualquer falha fora dos critérios previstos interrompe o avanço e retorna ao Planeamento.
 
-## 15. Decisões pendentes
+## 15. Decisões ainda pendentes
 
-| ID | Decisão | Recomendação ou questão aberta |
+A finalidade diária, D pela data local do slot, janela contratual e exclusão do cron de duas horas do MVP foram aprovados conforme o encaminhamento central. Não reapresentá-los como questões de negócio em aberto.
+
+| ID | Decisão pendente | Recomendação documental |
 |---|---|---|
-| D01 | Finalidade da cadência | Atualização contínua ou preparação diária para 14h30? |
-| D02 | Ciclo agendado | Recomenda-se D = data local do slot nominal |
-| D03 | Timetable | Recomenda-se avaliar cron por intervalo; validar retomada antes de ativar |
-| D04 | Tolerância de atraso | 15 minutos propostos, sujeitos ao corte; valor não ratificado |
-| D05 | Unicidade de slot | Definir identidade, reivindicação atômica e estado ambíguo |
-| D06 | Corte com coleta em andamento | Definir interrupção ou conclusão tardia, sem declarar SLA |
-| D07 | Frescor e qualidade | Definir limites por finalidade/cidade e tratamento de nulos |
-| D08 | Fallback | Definir idade, cobertura, origem e comunicação de indisponibilidade |
-| D09 | Próximo gate de testes | Delimitar arquivos, E1/E2, cenários e critérios autorizados |
-| D10 | Validação Airflow posterior | Definir ambiente e quantidade de runs em autorização separada |
+| D03 | Timetable diária e retomada | Intervalo diário explícito com elegibilidade antes de HTTP; revisar antes de ativar |
+| D04 | Tolerância e fronteiras | Alternativa A: até 14h00 inclusive para slot 13h45; ainda não ratificada |
+| D05 | Unicidade de slot | Definir chave, claim atômico, persistência e ambiguidade; fora de T01 |
+| D06 | Corte com coleta em andamento | Concluir como tardio/inelegível; confirmar se negócio exige parada absoluta |
+| D07 | Frescor e nulos | Avaliar pior idade entre cidades; 45 minutos é hipótese candidata, não limite aprovado |
+| D08 | Fallback | Indisponibilidade explícita no MVP; nenhuma substituição automática |
+| D09 | Gate T01 | Aprovar ou ajustar o escopo fechado da seção 13 antes de implementar/executar |
+| D10 | Integração e agenda | Novo gate posterior, com contagem de runs e contenção |
 
-A aprovação documental desta proposta não aprova automaticamente todos os valores recomendados nem libera testes, implementação ou agenda.
+Os horários 13h45/14h15/14h30 permanecem hipóteses iniciais de operação; sua implementação e aceitação como garantias não foram liberadas.
 
 ## 16. Referências
 
@@ -346,12 +459,12 @@ Documentação oficial consultada durante o diagnóstico de 16/10/2026:
 - https://airflow.apache.org/docs/apache-airflow/2.9.2/authoring-and-scheduling/timetable.html
 - https://open-meteo.com/en/docs
 
-## 17. Devolução
+## 17. Devolução e controle da revisão
 
-**P09-P01 — PROPOSTA TÉCNICA SUBMETIDA.**
+**P09-P01 v0.2 — REVISÃO DOCUMENTAL SUBMETIDA.**
 
-Esta versão consolida a proposta apresentada no chat e explicita decisões que o parecer preliminar central considerou pendentes. Nenhum teste proposto foi executado por esta entrega.
+Esta revisão incorpora a direção diária aprovada, preserva integralmente as linhas F01–F12 e detalha seus limites, a interrupção de processo e o escopo proposto para T01.
 
-Submeter à revisão integral de João e do Planeamento central. Passo 09 permanece não validado. Novos testes, alterações e ensaios dependem de decisão explícita específica. Passos 10–11 permanecem não liberados.
+Diff contra v0.1 apresentado a João antes da publicação e expressamente aprovado em 17/10/2026 para publicação exclusivamente documental. O commit desta revisão será identificado no encaminhamento central, sem confundi-lo com a baseline operacional. Essa aprovação não libera P09-T01.
 
-O commit desta entrega é documental e distinto das baselines operacional e de evidência P08 citadas acima; seu identificador acompanha o encaminhamento de publicação.
+Nenhum teste foi executado nesta revisão. Passo 09 não validado. P09-T01, implementação temporal, ensaio de agenda e passos 10–11 permanecem não liberados.
