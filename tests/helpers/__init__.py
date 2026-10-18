@@ -1,0 +1,1 @@
+"""Helpers exclusivos dos testes offline de resiliência."""
