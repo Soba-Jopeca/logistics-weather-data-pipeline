@@ -93,7 +93,8 @@ def resolve_daily_slot(
         raise ValueError("Origem de execução não suportada.")
     end = aware_utc(data_interval_end)
     start = aware_utc(data_interval_start)
-    day = end.astimezone(ZoneInfo(TIMEZONE_NAME)).date()
+    # Airflow usa Pendulum; normalizar sua subclasse Date para o contrato puro.
+    day = date.fromisoformat(end.astimezone(ZoneInfo(TIMEZONE_NAME)).date().isoformat())
     slot = DailySlot(day, end)
     # Subtrair uma data local, não assumir duração UTC fixa em transições de fuso.
     if start != _local_instant(day - timedelta(days=1), 13, 45):
@@ -132,8 +133,8 @@ class DailyAdmissionError(RuntimeError):
 class FirstTransportGuard:
     """Uma instância por rodada; nunca reutilizar em outra execução.
 
-    O adaptador futuro deve chamar antes de requests.get. Esta classe não
-    autoriza coleta, não substitui claim/dispatch e não é usada pela DAG atual.
+    O adaptador chama antes de requests.get. Esta classe não autoriza coleta
+    isoladamente e não substitui claim/dispatch.
     """
 
     def __init__(self, slot, clock):
