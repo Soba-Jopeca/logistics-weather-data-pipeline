@@ -469,6 +469,7 @@ def execute_extraction(
     manifest_path,
     manifest_sha256,
     project_root,
+    before_first_transport=None,
 ):
     from datetime import date
 
@@ -577,6 +578,8 @@ def execute_extraction(
                     location_id: run["request_params"]
                     for location_id, run in manifest["runs"].items()
                 },
+                **({"before_first_transport": before_first_transport}
+                   if before_first_transport is not None else {}),
             )
 
             phase = "persistence_error"
