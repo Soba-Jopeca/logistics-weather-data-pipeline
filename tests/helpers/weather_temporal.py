@@ -93,3 +93,42 @@ def claim_worker(root, candidate, pipe, interrupt_after_link=False):
             pipe.send({"event": "result", "created": result["created"],
                        "batch_id": result["document"]["batch_id"]})
     pipe.close()
+
+
+def daily_worker(root, config, locations, payloads, pipe):
+    """Produtor em processo spawn com transporte sintético e barreiras próprias."""
+    from unittest.mock import patch
+    import requests
+    import scripts.extract_weather as extractor
+    from scripts.weather_daily import prepare_daily_extraction, execute_daily_extraction
+    from helpers.weather_resilience import blocked_external_network, restricted_writes
+    calls = []
+    by_coord = {(loc["latitude"], loc["longitude"]): loc["location_id"] for loc in locations}
+
+    class FixedClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return local_time(14).astimezone(tz)
+
+    def transport(endpoint, *, params, timeout):
+        city = by_coord[(params["latitude"], params["longitude"])]
+        calls.append(city)
+        response = requests.Response()
+        response.status_code = 200
+        response._content = json.dumps(payloads[city]).encode()
+        return response
+
+    with restricted_writes(root), blocked_external_network(), \
+            patch.object(requests, "get", transport), patch.object(extractor, "datetime", FixedClock):
+        pipe.send({"event": "ready"})
+        assert pipe.recv() == "go"
+        try:
+            prepared = prepare_daily_extraction(project_root=root, config=config, locations=locations,
+                cycle_date=date(2026, 10, 13), clock=lambda: local_time(13, 45))
+            result = execute_daily_extraction(project_root=root, prepared=prepared,
+                                              clock=lambda: local_time(14))
+            state = result["mode"]
+        except (ValueError, OSError):
+            state = "blocked"
+        pipe.send({"event": "result", "state": state, "calls": len(calls)})
+    pipe.close()
