@@ -14,6 +14,9 @@ MODULES = [
     "scripts.weather_window",
     "scripts.weather_manifest",
     "scripts.weather_interface",
+    "scripts.weather_temporal",
+    "scripts.weather_slots",
+    "scripts.weather_daily",
 ]
 
 
@@ -64,6 +67,9 @@ def test_module_top_level_has_no_project_io(monkeypatch, module_name):
             "scripts.weather_window": "build_cycle_window",
             "scripts.weather_manifest": "build_manifest_document",
             "scripts.weather_interface": "execute_extraction",
+            "scripts.weather_temporal": "resolve_daily_slot",
+            "scripts.weather_slots": "acquire_slot",
+            "scripts.weather_daily": "prepare_daily_extraction",
         }[module_name]
     ))
 
