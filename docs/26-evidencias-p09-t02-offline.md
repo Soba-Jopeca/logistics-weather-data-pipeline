@@ -1,6 +1,36 @@
 # P09-T02 — Evidências parciais de C1
 
-## Estado e autorização
+## Atualização após autorização de publicação e ambiente — 19/10/2026
+
+C1 passou nos testes offline abaixo. O restante deste documento conserva o
+registro histórico da verificação anterior, cujos bloqueios de Python/pytest
+foram resolvidos nesta atualização. P09-T02 e passo 09 continuam NÃO VALIDADOS.
+
+- Ambiente descartável: CPython 3.10.14, pytest 9.1.1; dependências instaladas
+  a partir do requirements.txt existente, sem modificá-lo.
+- C1: `python -m pytest -q -p no:cacheprovider tests/test_weather_temporal.py tests/test_weather_slots.py`:
+  **43 passed in 1.47s**, saída 0.
+- Regressão: `python -m pytest -q -p no:cacheprovider tests --ignore=tests/test_weather_dag_structure.py`:
+  **235 passed in 5.04s**, saída 0 (inclui os 43 testes de C1; não somar).
+- Ambas as execuções usaram PYTHONDONTWRITEBYTECODE=1 e produziram JUnit
+  temporário externo ao repositório, respectivamente p09-c1-junit.xml e
+  p09-regression-junit.xml. Os XML não integram esta publicação.
+- Foram exercitados os testes versionados de concorrência, interrupção,
+  dispatch, fronteiras temporais e falhas de persistência de C1.
+- O bloqueio HTTP da suíte e as barreiras de rede/escrita dos testes de slots
+  permaneceram ativos, inclusive nos trabalhadores sintéticos. Não houve
+  chamada meteorológica real. Isso não comprova isolamento por namespace
+  nem as garantias do filesystem operacional compartilhado.
+- Airflow/DagBag/timetable não foram executados nesta rodada. C2/C3 e o
+  restante de T01–T20 continuam pendentes; não há unicidade ponta a ponta.
+- Os seis arquivos do commit local 14a7e2d foram publicados pelo conector
+  GitHub na branch feat/p09-t02-offline-policy, com head a16f457 antes desta
+  atualização. O Git HTTPS não tinha credenciais; o conector gerou commits
+  próprios. Comparação local de árvores: nenhuma diferença de conteúdo.
+- Main, schedule, retries, Compose, PostgreSQL e contratos existentes não
+  foram alterados. Não houve merge na main, E3 ou execução de DAG/tasks.
+
+## Registro histórico: estado e autorização
 
 - Checkpoint: CP-2026-10-13 v2.
 - Baseline: `14ed58b9426edc7663b9d6420ba7af5db9e37479`.
