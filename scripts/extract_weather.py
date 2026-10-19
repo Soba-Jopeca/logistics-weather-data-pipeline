@@ -252,7 +252,9 @@ def normalize_forecasts(hourly, forecast_times, run_id, location_id):
 
     return records
 
-def fetch_forecast_response(endpoint, params, timeout=(10, 30)):
+def fetch_forecast_response(endpoint, params, timeout=(10, 30), *, before_first_transport=None):
+    if before_first_transport is not None:
+        before_first_transport()
     return requests.get(
         endpoint,
         params=params,
@@ -295,7 +297,7 @@ def save_raw_bytes(raw_bytes, run_id, *, project_root=None):
         "raw_sha256": expected_hash,
     }
 
-def execute_attempt(endpoint, params, timeout, run_id, attempt_no):
+def execute_attempt(endpoint, params, timeout, run_id, attempt_no, *, before_first_transport=None):
     attempt = {
         "attempt_id": str(uuid4()),
         "run_id": run_id,
@@ -312,7 +314,9 @@ def execute_attempt(endpoint, params, timeout, run_id, attempt_no):
     timer = perf_counter()
 
     try:
-        response = fetch_forecast_response(endpoint, params, timeout)
+        options = ({"before_first_transport": before_first_transport}
+                   if before_first_transport is not None else {})
+        response = fetch_forecast_response(endpoint, params, timeout, **options)
         attempt["http_status"] = response.status_code
 
         if not 200 <= response.status_code < 300:
@@ -340,7 +344,7 @@ def execute_attempt(endpoint, params, timeout, run_id, attempt_no):
 
     return response, attempt
 
-def fetch_with_retries(endpoint, params, timeout, run_id, max_attempts=3):
+def fetch_with_retries(endpoint, params, timeout, run_id, max_attempts=3, *, before_first_transport=None):
     if type(max_attempts) is not int or not 1 <= max_attempts <= 3:
         raise ValueError("max_attempts deve estar entre 1 e 3.")
 
@@ -355,6 +359,8 @@ def fetch_with_retries(endpoint, params, timeout, run_id, max_attempts=3):
             timeout,
             run_id,
             attempt_no,
+            **({"before_first_transport": before_first_transport}
+               if before_first_transport is not None else {}),
         )
         attempts.append(attempt)
 
@@ -444,6 +450,7 @@ def collect_location(
     *,
     project_root=None,
     request_params=None,
+    before_first_transport=None,
 ):
     run_id = str(uuid4()) if run_id is None else run_id
     location_snapshot = deepcopy(location)
@@ -499,6 +506,8 @@ def collect_location(
         params,
         config["timeout"],
         run_id,
+        **({"before_first_transport": before_first_transport}
+           if before_first_transport is not None else {}),
     )
 
     report["attempts"] = attempts
@@ -576,6 +585,7 @@ def collect_batch(
     run_ids=None,
     project_root=None,
     request_params_by_location=None,
+    before_first_transport=None,
 ):
     from uuid import UUID
 
@@ -653,6 +663,8 @@ def collect_batch(
         run_id = frozen_run_ids[location["location_id"]]
 
         options = {"run_id": run_id}
+        if before_first_transport is not None:
+            options["before_first_transport"] = before_first_transport
         if frozen_request_params is not None:
             options["request_params"] = frozen_request_params[
                 location["location_id"]
@@ -760,45 +772,35 @@ def save_batch_report(batch, *, project_root=None):
     return output_path.relative_to(root).as_posix()
 
 def main():
-    from scripts.weather_interface import (
-        execute_extraction,
-        prepare_extraction,
+    from scripts.weather_daily import (
+        prepare_daily_extraction, execute_daily_extraction, reconcile_daily_extraction,
     )
+    from scripts.weather_temporal import DailyAdmissionError
 
     args = parse_args()
-    config = load_api_config()
-    locations = load_locations()
-
-    reference = prepare_extraction(
-        cycle_date=args.cycle_date,
-        config=config,
-        locations=locations,
-        project_root=PROJECT_ROOT,
-    )
-
-    result = execute_extraction(
-        manifest_path=reference["manifest_path"],
-        manifest_sha256=reference["manifest_sha256"],
-        project_root=PROJECT_ROOT,
-    )
-
+    try:
+        reference = prepare_daily_extraction(
+            cycle_date=args.cycle_date, config=load_api_config(),
+            locations=load_locations(), project_root=PROJECT_ROOT,
+            clock=lambda: datetime.now(timezone.utc),
+        )
+        result = execute_daily_extraction(
+            prepared=reference, project_root=PROJECT_ROOT,
+            clock=lambda: datetime.now(timezone.utc),
+        )
+        evaluation = reconcile_daily_extraction(
+            prepared=result, project_root=PROJECT_ROOT,
+            clock=lambda: datetime.now(timezone.utc),
+        )
+    except (DailyAdmissionError, ValueError, OSError) as error:
+        print(f"Indisponível para decisão diária: {error}", file=sys.stderr)
+        return 1
     print("Batch:", result["batch_id"])
     print("Ciclo:", result["cycle_date"])
     print("Modo:", result["mode"])
-    print("Status:", result["batch_status"])
-    print(
-        "Localidades validadas:",
-        result["successful_location_count"],
-        "/",
-        result["location_count"],
-    )
-    print("Registros:", result["record_count"])
-    print("Nulos:", result["null_count"])
-    print("Manifesto:", PROJECT_ROOT / result["manifest_path"])
-    print("Resumo salvo:", PROJECT_ROOT / result["batch_report_path"])
-    print("Conclusão:", PROJECT_ROOT / result["completion_path"])
-
-    return 0 if result["batch_status"] == "success" else 1
+    print("Status técnico:", result["batch_status"])
+    print("Avaliação operacional:", json.dumps(evaluation, ensure_ascii=False))
+    return 0 if evaluation["eligible"] else 1
 if __name__ == "__main__":
     try:
         sys.exit(main())
