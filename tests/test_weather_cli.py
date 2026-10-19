@@ -12,8 +12,8 @@ import scripts.extract_weather as extractor
     " expected_status, expected_exit, required_count",
     [
         ("complete", 17, 0, 13, "success", 0, 32),
-        ("null", 17, 0, 13, "success", 0, 32),
-        ("late", 21, 7, 13, "success", 0, 29),
+        ("null", 17, 0, 13, "success", 1, 32),
+        ("late", 21, 7, 13, "success", 1, 29),
         ("missing", 17, 0, 13, "failed", 1, 32),
         ("ended", 3, 0, 15, "failed", 1, 0),
     ],
@@ -87,6 +87,10 @@ def test_main_persists_batch_and_returns_expected_exit_code(
     exit_code = extractor.main()
 
     assert exit_code == expected_exit
+    if scenario in ("late", "ended"):
+        assert visited == []
+        assert not (tmp_path / "data/raw").exists()
+        return
     assert visited == [item["location_id"] for item in locations]
 
     batch_files = list((tmp_path / "data/raw/batches").glob("*.json"))
