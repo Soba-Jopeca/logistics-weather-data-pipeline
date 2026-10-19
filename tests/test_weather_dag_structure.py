@@ -113,7 +113,7 @@ class WeatherDagStructureTests(unittest.TestCase):
         except ModuleNotFoundError as error:
             if error.name != "airflow":
                 raise
-            raise unittest.SkipTest("Executar no ambiente com Airflow 2.9.2.") from None
+            raise AssertionError("Airflow 2.9.2 obrigatório; não aceitar skip neste gate.") from None
         if airflow.__version__ != "2.9.2":
             raise AssertionError("A validação exige Apache Airflow 2.9.2.")
         before = set(sys.modules)
@@ -193,7 +193,7 @@ class WeatherDagStructureTests(unittest.TestCase):
         )
         for node in ast.walk(function):
             if isinstance(node, ast.ImportFrom):
-                self.assertFalse(any(alias.name in {"execute_extraction", "collect_batch", "collect_location"} for alias in node.names))
+                self.assertFalse(any(alias.name in {"execute_extraction", "execute_daily_extraction", "collect_batch", "collect_location"} for alias in node.names))
         # Análise AST, sem invocar a função ou simular uma task.
         self.assertTrue(any(isinstance(node, ast.Raise) for node in ast.walk(function)))
 
