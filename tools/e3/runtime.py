@@ -157,6 +157,9 @@ def dependency_context(*, root, scenario, ledger, locations, cycle_date, clocks,
             for name, phase in [('prepare_daily_extraction', 'prepare'), ('execute_daily_extraction', 'execute'),
                                 ('reconcile_daily_extraction', 'reconcile')]:
                 stack.enter_context(patch.object(daily, name, wrap_policy(getattr(daily, name), phase)))
+            # Python 3.10 pathlib caches io.open in its accessor. Guard the
+            # public Path entry point too, preserving the original implementation.
+            stack.enter_context(patch.object(Path, 'open', checked_open(Path.open)))
             for module in (builtins, io):
                 stack.enter_context(patch.object(module, 'open', checked_open(module.open)))
             for module, name in [(daily, 'persist_immutable_document'), (slots, '_publish_exclusive')]:
