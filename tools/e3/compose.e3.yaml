@@ -1,0 +1,110 @@
+# Independent definition. Never combine with operational compose.yaml.
+name: p09-e3-${E3_CAMPAIGN_ID:?Explicit campaign identity required}
+services:
+  metadata:
+    profiles: [operational-approved]
+    image: ${E3_POSTGRES_IMAGE:?Pin an existing approved image digest}
+    pull_policy: never
+    restart: "no"
+    environment:
+      POSTGRES_USER: e3
+      POSTGRES_DB: e3_metadata
+      POSTGRES_PASSWORD_FILE: /run/secrets/e3_db_password
+    secrets: [e3_db_password]
+    entrypoint: [/bin/sh, -ec]
+    command:
+      - >-
+        test -s /gate/metadata-start.sha256 &&
+        cd /gate && sha256sum -c metadata-start.sha256 &&
+        exec /usr/local/bin/docker-entrypoint.sh postgres
+    volumes:
+      - type: bind
+        source: ${E3_ROOT:?Exclusive campaign root required}/control
+        target: /gate
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${E3_ROOT:?Exclusive campaign root required}/metadata
+        target: /var/lib/postgresql/data
+        bind:
+          create_host_path: false
+    networks: [isolated]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U e3 -d e3_metadata"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  scheduler:
+    profiles: [operational-approved]
+    image: ${E3_AIRFLOW_IMAGE:?Pin existing Airflow 2.9.2 image digest}
+    pull_policy: never
+    restart: "no"
+    read_only: true
+    user: "${E3_UID:?Explicit unprivileged Airflow UID}:0"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONPATH: /baseline:/harness
+      AIRFLOW_HOME: /campaign/runtime/airflow
+      AIRFLOW__CORE__DAGS_FOLDER: /campaign/runtime/dags
+      AIRFLOW__CORE__PLUGINS_FOLDER: /campaign/runtime/plugins
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+      AIRFLOW__CORE__PARALLELISM: "4"
+      AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: "1"
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN_CMD: "cat /run/secrets/e3_sql_connection"
+      AIRFLOW__CORE__FERNET_KEY_CMD: "cat /run/secrets/e3_fernet"
+      AIRFLOW__LOGGING__BASE_LOG_FOLDER: /campaign/logs
+      TMPDIR: /campaign/runtime/tmp
+      WEATHER_ENDPOINT: https://api.open-meteo.com/v1/forecast
+    volumes:
+      - type: bind
+        source: ${E3_BASELINE_ROOT:?Read-only baseline checkout required}/scripts
+        target: /baseline/scripts
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${E3_BASELINE_ROOT:?}/dags
+        target: /baseline/dags
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${E3_BASELINE_ROOT:?}/config/locations.json
+        target: /baseline/config/locations.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${E3_HARNESS_ROOT:?Read-only harness checkout required}/tools/e3
+        target: /harness/tools/e3
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${E3_ROOT:?Exclusive campaign root required}
+        target: /campaign
+        bind:
+          create_host_path: false
+    secrets: [e3_sql_connection, e3_fernet]
+    networks: [isolated]
+    # Deliberately no scheduler command: explicit operational preparation is required.
+    entrypoint: [python, -m, tools.e3.preflight]
+    command: [--campaign, /campaign/control/campaign.json, --evidence, /campaign/control/isolation.json]
+    depends_on:
+      metadata:
+        condition: service_healthy
+networks:
+  isolated:
+    internal: true
+secrets:
+  e3_db_password:
+    file: ${E3_ROOT:?}/control/secrets/db_password
+  e3_sql_connection:
+    file: ${E3_ROOT:?}/control/secrets/sql_connection
+  e3_fernet:
+    file: ${E3_ROOT:?}/control/secrets/fernet

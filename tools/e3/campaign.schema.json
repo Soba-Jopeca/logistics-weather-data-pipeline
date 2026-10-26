@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "campaign_id",
+    "baseline",
+    "enabled",
+    "root",
+    "code_root",
+    "hashes",
+    "scenarios",
+    "slots",
+    "authorization"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "campaign_id": {
+      "type": "string",
+      "pattern": "^p09e3_[a-z0-9_]{8,64}$"
+    },
+    "baseline": {
+      "const": "70b02b044e36adaa0a29612da87cf8bf688567c9"
+    },
+    "enabled": {
+      "type": "boolean"
+    },
+    "root": {
+      "type": "string"
+    },
+    "code_root": {
+      "type": "string"
+    },
+    "hashes": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      }
+    },
+    "scenarios": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "B01",
+          "B02",
+          "B03",
+          "B04",
+          "B05",
+          "B06",
+          "B07",
+          "B08",
+          "B09",
+          "B10",
+          "C01",
+          "C02"
+        ]
+      }
+    },
+    "slots": {
+      "type": "array",
+      "maxItems": 2,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "format": "date-time"
+      }
+    },
+    "authorization": {
+      "type": "string"
+    }
+  }
+}

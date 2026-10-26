@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "campaign_id": "p09e3_example_disabled",
+  "baseline": "70b02b044e36adaa0a29612da87cf8bf688567c9",
+  "enabled": false,
+  "root": "/campaign",
+  "code_root": "/baseline",
+  "hashes": {
+    "config/locations.json": "06a4e066299c95f0d0fe4088f356f46956da03f1b1c6354192dd1216cfcf9ce9",
+    "dags/weather_extract.py": "37e22cd3c007f10517e609cf9a5d27f3091b73c4fbd1366736145d7a34d19568",
+    "scripts/__init__.py": "39b8b54456db15e299ac15aab252ef56e16ff3375803da2aea7b64819b9840ec",
+    "scripts/extract_weather.py": "1bd23fec467ecf9523b8a7973519e26c5721bd2c519913275d596e93373c0b84",
+    "scripts/weather_daily.py": "eb81b40ce0228fc484034e96d12cc6f2c75322ca5c776d6548c346abb423c920",
+    "scripts/weather_interface.py": "1b589c0cfb1ab01465634ac34d97fcf3e121f35dc4b87c0533a7b79095ebc49c",
+    "scripts/weather_manifest.py": "679a26233c7647967de42a3c16fd1e2373f12f31b218386fef6862ccc845c74f",
+    "scripts/weather_slots.py": "48399aa1249602c462655b027419d2c0a170ffc173ee441ad08f6866008e73bb",
+    "scripts/weather_temporal.py": "14fb428e0c417da942905d82ff14d96c49d194c7129da4bba88f2803fd475112",
+    "scripts/weather_window.py": "5a3bccf919c59444e84594d608f4eb8a260bdb6cc6a229bbdcd497b4642738d8"
+  },
+  "scenarios": [
+    "B01",
+    "B02",
+    "B03",
+    "B04",
+    "B05",
+    "B06",
+    "B07",
+    "B08",
+    "B09",
+    "B10",
+    "C01",
+    "C02"
+  ],
+  "slots": [],
+  "authorization": ""
+}
