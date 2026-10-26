@@ -4,6 +4,161 @@ Baseline: `70b02b044e36adaa0a29612da87cf8bf688567c9`.
 Branch exclusiva: `feat/p09-e3-isolated-harness`.
 Data: 25/10/2026 (America/Sao_Paulo).
 
+## Atualização C02 — 26/10/2026: bloqueio fundamentado
+
+**CPython compilado; runtime Airflow ainda INCOMPLETO. Não houve reteste nem regressão nova.**
+Esta atualização substitui a descrição de ausência absoluta do interpretador abaixo,
+que permanece como histórico P03/C01. Os 315 aprovados, 14 falhas e 8 erros são
+resultados anteriores e NÃO resultados desta rodada C02.
+
+### Proveniência e integridade
+
+- Origem oficial: https://www.python.org/downloads/release/python-31014/
+- Artefato: https://www.python.org/ftp/python/3.10.14/Python-3.10.14.tar.xz
+- Assinatura: mesma URL com sufixo `.asc`.
+- Tipo: código-fonte XZ, 19.600.188 bytes; destino Linux x86_64.
+- SHA-256: `9c50481faa8c2832329ba0fc8868d0a606a680fc4f60ec48d26ce8e076751fda`.
+- MD5 publicado na página oficial e conferido: `05148354ce821ba7369e5b7958435400`.
+  MD5 não foi usado isoladamente como prova de autenticidade.
+- GPG: GOODSIG/VALIDSIG para subchave `CFDCA245B1043CF2A5F97865FFE87404168BD847`,
+  chave primária `A035C8C19219BA821ECEA86B64E628F8D684696D`, Pablo Galindo Salgado.
+- Chave obtida de https://keys.openpgp.org/vks/v1/by-fingerprint/CFDCA245B1043CF2A5F97865FFE87404168BD847
+  e identidade da subchave corroborada no projeto oficial:
+  https://github.com/python/cpython/issues/117476 e
+  https://discuss.python.org/t/bogus-3-10-beta-1-build/8461 .
+- O keyring temporário reporta TRUST_UNDEFINED, sem certificação local de confiança.
+  A procedência combina download HTTPS oficial, checksum publicado e assinatura
+  criptográfica com fingerprint corroborado; não é inferida apenas do hash calculado.
+- A tentativa de obter `/static/files/pubkeys.txt` retornou 404; não foi usada como evidência.
+
+### Preparação executada
+
+Diretório temporário: `/workspace/scratch/5bbc9498ddbd/e3-cpython-c02`.
+Ferramentas já presentes: GCC 13.3.0 e GNU Make 4.3.
+
+```bash
+tar -xf ../Python-3.10.14.tar.xz
+cd Python-3.10.14
+./configure --prefix=/workspace/scratch/5bbc9498ddbd/e3-cpython-c02/runtime --with-ensurepip=no
+make -j4
+make altinstall
+```
+
+Configure/build/install concluíram com exit 0. O executável confirma CPython
+3.10.14, ABI `cpython-310-x86_64-linux-gnu`. O resultado do make NÃO comprova que
+todos os módulos opcionais foram construídos.
+
+Nenhum pip/compilador/pacote novo foi instalado. Um `.pth` exclusivamente dentro
+do prefixo temporário referencia os site-packages locais preexistentes de
+`p09-offline-venv` e `airflow-p07-venv`. Os 9.954 arquivos inventariados nesses
+pacotes tiveram seus hashes reconferidos e permaneceram idênticos.
+
+### Falha atual C02-ENV-03
+
+Airflow 2.9.2 não importável: `ModuleNotFoundError: No module named '_sqlite3'`.
+Import independente de ctypes: `ModuleNotFoundError: No module named '_ctypes'`.
+Ambos exit 1, sem iniciar serviços ou conectar a banco operacional.
+
+A compilação informa ausência dos headers SQLite e falha `ffi.h: No such file or
+directory` para ctypes. Busca local não encontrou sqlite3.h nem ffi.h compatível
+com Linux, nem extensões CPython 3.10 correspondentes. Há um ffi.h específico de
+macOS no fonte CPython, que NÃO foi usado como substituto Linux.
+
+Bibliotecas runtime locais existem: libsqlite3-0 `3.45.1-1ubuntu2.5` e libffi8
+`3.4.6-1build1`. Os headers de desenvolvimento não estão presentes. Extensões
+CPython 3.12 encontradas não foram reaproveitadas por incompatibilidade de ABI.
+
+Outros módulos opcionais ausentes reportados pelo build: _bz2, _curses,
+_curses_panel, _dbm, _gdbm, _lzma, _tkinter, _uuid, nis e readline. Não se afirma
+que todos sejam exigidos pelo harness; não foram instaladas dependências para eles.
+
+### Gates e matriz de ocorrências
+
+| Gate | Resultado |
+|---|---|
+| Obtenção/procedência CPython | Conferida; assinatura válida |
+| Executável e ABI 3.10.14 | Confirmados |
+| Airflow importável | BLOQUEADO por _sqlite3; ctypes também indisponível |
+| Retestes das 22 ocorrências | NÃO EXECUTADOS nesta rodada |
+| Regressão integral | NÃO EXECUTADA nesta rodada |
+| Preservação operacional | Arquivos operacionais intactos; sem operações E3 |
+
+Cada uma das 22 linhas da matriz histórica abaixo permanece **pendente de reteste**.
+A causa imediata histórica continua registrada no JUnit preservado; a falha atual
+de runtime impede concluir se há defeitos adicionais de implementação. Não houve
+mudança de expectativa, remoção de teste ou transformação em skip.
+
+### Decisão necessária e rollback
+
+Autorizar obtenção apenas dos headers/arquivos de desenvolvimento compatíveis com
+SQLite/libffi locais, com proveniência verificável e extração em prefixo temporário,
+sem instalação sistêmica; ou fornecer runtime 3.10.14 completo e confiável.
+Depois repetir os gates e todos os testes já autorizados. Dependências adicionais
+que se revelem necessárias continuam exigindo decisão específica.
+
+Nenhum código do harness foi alterado nesta rodada. Atualizados apenas este
+relatório e tools/e3/README.md, ambos entre os 13 arquivos autorizados. Não há
+consumo do orçamento futuro de 15 runs/37 transportes, nem execução de A/B/C.
+Rollback: manter branch sem merge, preservar logs e prefixo temporário para análise;
+não tocar ambientes, bancos, volumes ou dados operacionais.
+
+### Hashes dos registros C02
+
+| Registro temporário | SHA-256 |
+|---|---|
+| `configure.log` | `ac5fd2c8ab69ed1502c11e7429774d3b97876605b2278ec37eccf4b57414fbd9` |
+| `build.log` | `ef014e950424812bd1b20ba13edef0d591be181c52edb64e70b360cbcde0cbe7` |
+| `install.log` | `8d1d26c5a2a511f6058c972e468433e76eec931e1886a13f0c83284e19a18c31` |
+| `signature.log` | `7e1a0e16b195edcc35ed7ddf6f46e41c23dcd7028094b72a9987308847b37ea3` |
+| `import-airflow.log` | `9333548a37241b072e2ef3d93abf8791f2f85b25ee7228a45d4bd390a07a5778` |
+| `import-ctypes.log` | `a8648f795fd091061723f43290fb11ddcce45b31794b508145b7070beb88cdb2` |
+| `runtime/bin/python3.10` | `54f4a5b3971977b7b2eb1d595837bd5eff4528eb0e56760b9635e5a66b0386db` |
+| `local-packages-before.json` | `f0066aee365e4af3674f8a18f520ddd9b2acab4b053e073e7e9ceff157f9dd5a` |
+
+### Tracebacks e assinatura preservados
+
+```text
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "/workspace/scratch/5bbc9498ddbd/airflow-p07-venv/lib/python3.10/site-packages/airflow/__init__.py", line 53, in <module>
+    from airflow import configuration, settings
+  File "/workspace/scratch/5bbc9498ddbd/airflow-p07-venv/lib/python3.10/site-packages/airflow/configuration.py", line 2348, in <module>
+    conf.validate()
+  File "/workspace/scratch/5bbc9498ddbd/airflow-p07-venv/lib/python3.10/site-packages/airflow/configuration.py", line 718, in validate
+    self._validate_sqlite3_version()
+  File "/workspace/scratch/5bbc9498ddbd/airflow-p07-venv/lib/python3.10/site-packages/airflow/configuration.py", line 815, in _validate_sqlite3_version
+    import sqlite3
+  File "/workspace/scratch/5bbc9498ddbd/e3-cpython-c02/runtime/lib/python3.10/sqlite3/__init__.py", line 57, in <module>
+    from sqlite3.dbapi2 import *
+  File "/workspace/scratch/5bbc9498ddbd/e3-cpython-c02/runtime/lib/python3.10/sqlite3/dbapi2.py", line 27, in <module>
+    from _sqlite3 import *
+ModuleNotFoundError: No module named '_sqlite3'
+
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "/workspace/scratch/5bbc9498ddbd/e3-cpython-c02/runtime/lib/python3.10/ctypes/__init__.py", line 8, in <module>
+    from _ctypes import Union, Structure, Array
+ModuleNotFoundError: No module named '_ctypes'
+
+[GNUPG:] NEWSIG
+gpg: Signature made Thu Mar 21 07:55:53 2024 GMT
+gpg:                using RSA key CFDCA245B1043CF2A5F97865FFE87404168BD847
+[GNUPG:] KEY_CONSIDERED A035C8C19219BA821ECEA86B64E628F8D684696D 0
+[GNUPG:] SIG_ID rq8iYvHRkoABx8NBwjv+v56o4RU 2024-03-21 1711007753
+[GNUPG:] GOODSIG FFE87404168BD847 Pablo Galindo Salgado <pablogsal@gmail.com>
+gpg: Good signature from "Pablo Galindo Salgado <pablogsal@gmail.com>" [unknown]
+[GNUPG:] VALIDSIG CFDCA245B1043CF2A5F97865FFE87404168BD847 2024-03-21 1711007753 0 4 0 1 8 00 A035C8C19219BA821ECEA86B64E628F8D684696D
+[GNUPG:] KEY_CONSIDERED A035C8C19219BA821ECEA86B64E628F8D684696D 0
+[GNUPG:] TRUST_UNDEFINED 0 pgp
+gpg: WARNING: This key is not certified with a trusted signature!
+gpg:          There is no indication that the signature belongs to the owner.
+Primary key fingerprint: A035 C8C1 9219 BA82 1ECE  A86B 64E6 28F8 D684 696D
+     Subkey fingerprint: CFDC A245 B104 3CF2 A5F9  7865 FFE8 7404 168B D847
+
+```
+
+---
+
 ## Parecer
 
 Não emitir “harness implementado e validado offline”: a regressão não aprovou.

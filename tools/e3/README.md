@@ -6,10 +6,12 @@ previous tests and historical records must remain byte-for-byte unchanged.
 
 ## Current status
 
-Implementation under review. Offline validation is **BLOCKED**, not approved:
-the existing CPython 3.10.14 executable is missing in this hosted session; only
-CPython 3.12.14 is available. Existing Airflow 2.9.2 native extensions target 3.10.
-No package/interpreter was installed. See document 27 for actual test results.
+Implementation under review. Offline validation remains **BLOCKED**, not approved.
+C02 restored CPython 3.10.14 from the signed official source and compiled it in a
+temporary prefix. Missing local Linux SQLite/libffi development headers prevented
+building _sqlite3 and _ctypes, so Airflow 2.9.2 still cannot import. No new dependencies
+were downloaded/installed. See document 27 (C02 update) for provenance and tracebacks.
+The prior 315 passed / 14 failed / 8 errors are historical, not a new C02 regression.
 Do not run this Compose, CLI runner, DAG or controller against operational services.
 
 ## Entry points
