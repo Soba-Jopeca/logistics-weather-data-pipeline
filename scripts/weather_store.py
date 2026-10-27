@@ -160,6 +160,7 @@ def build_load_package(batch_id, *, project_root=PROJECT_ROOT):
     attempts = []
     forecasts = []
     publications = []
+    raw_staging = []
     for location in manifest["locations"]:
         location_id = location["location_id"]
         run_info = manifest["runs"][location_id]
@@ -214,6 +215,14 @@ def build_load_package(batch_id, *, project_root=PROJECT_ROOT):
         records = []
         if run_status != "failed":
             raw_payload = _read_json(resolve_reference(root, raw_path))
+            raw_staging.append({
+                "run_id": report["run_id"],
+                "batch_id": canonical_batch_id,
+                "location_id": location_id,
+                "raw_path": raw_path,
+                "raw_sha256": report["raw_sha256"],
+                "raw_payload": raw_payload,
+            })
             collected_at = _parse_instant(report["collected_at"], "collected_at")
             records, normalized_validation = process_forecast(
                 raw_payload,
@@ -294,6 +303,7 @@ def build_load_package(batch_id, *, project_root=PROJECT_ROOT):
         "runs": runs,
         "attempts": attempts,
         "forecasts": forecasts,
+        "raw_staging": raw_staging,
         "publications": publications,
         "artifacts": [
             {"batch_id": canonical_batch_id, "artifact_path": path, **artifact}
@@ -482,7 +492,68 @@ def _existing_batch_is_complete(cursor, batch, package):
             )
         ],
     )
+    if "raw_staging" in package:
+        _require_exact_rows(
+            cursor,
+            "staging records",
+            """
+            SELECT run_id::TEXT, batch_id::TEXT, location_id, raw_path,
+                   rtrim(raw_sha256), raw_payload
+            FROM weather_mvp.weather_raw_staging
+            WHERE batch_id = %s
+            ORDER BY run_id, location_id
+            """,
+            (batch_id,),
+            [
+                (row["run_id"], row["batch_id"], row["location_id"],
+                 row["raw_path"], row["raw_sha256"], row["raw_payload"])
+                for row in sorted(package["raw_staging"],
+                                  key=lambda v: (v["run_id"], v["location_id"]))
+            ],
+        )
     return True
+
+
+def _insert_sql_forecasts(cursor, package):
+    """Stage verified JSON and validate SQL normalization against Python before commit."""
+    batch_id = package["batch"]["batch_id"]
+    for row in package["raw_staging"]:
+        cursor.execute(
+            """
+            INSERT INTO weather_mvp.weather_raw_staging
+              (batch_id, run_id, location_id, raw_path, raw_sha256, raw_payload)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            """,
+            (row["batch_id"], row["run_id"], row["location_id"],
+             row["raw_path"], row["raw_sha256"], _json(row["raw_payload"])),
+        )
+    sql_path = PROJECT_ROOT / "sql" / "transform_weather_staging_to_core.sql"
+    cursor.execute(sql_path.read_text(encoding="utf-8"), (batch_id,))
+    cursor.execute(
+        """
+        SELECT run_id::TEXT, location_id, forecast_time_utc,
+               temperature_2m_c, precipitation_mm, wind_speed_10m_kmh
+        FROM weather_mvp.weather_forecasts
+        WHERE run_id IN (SELECT run_id FROM weather_mvp.weather_runs
+                         WHERE batch_id = %s)
+        ORDER BY run_id, location_id, forecast_time_utc
+        """,
+        (batch_id,),
+    )
+    observed = cursor.fetchall()
+    expected = [
+        tuple(row[k] for k in (
+            "run_id", "location_id", "forecast_time_utc", "temperature_2m_c",
+            "precipitation_mm", "wind_speed_10m_kmh"))
+        for row in sorted(
+            package["forecasts"],
+            key=lambda row: (row["run_id"], row["location_id"],
+                             row["forecast_time_utc"]))
+    ]
+    if observed != expected:
+        raise WeatherStoreError(
+            "SQL normalization disagrees with verified Python forecasts."
+        )
 
 
 def persist_load_package(package, *, connect):
@@ -492,6 +563,10 @@ def persist_load_package(package, *, connect):
         with connection:
             with connection.cursor() as cursor:
                 batch = package["batch"]
+                cursor.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                    (str(batch["batch_id"]),),
+                )
                 cursor.execute(
                     """
                     INSERT INTO weather_mvp.weather_batches (
@@ -589,19 +664,24 @@ def persist_load_package(package, *, connect):
                         )),
                     )
 
-                for forecast in package["forecasts"]:
-                    cursor.execute(
-                        """
-                        INSERT INTO weather_mvp.weather_forecasts (
-                            run_id, location_id, forecast_time_utc,
-                            temperature_2m_c, precipitation_mm, wind_speed_10m_kmh
-                        ) VALUES (%s, %s, %s, %s, %s, %s)
-                        """,
-                        tuple(forecast[key] for key in (
-                            "run_id", "location_id", "forecast_time_utc",
-                            "temperature_2m_c", "precipitation_mm", "wind_speed_10m_kmh",
-                        )),
-                    )
+                if "raw_staging" in package:
+                    _insert_sql_forecasts(cursor, package)
+                else:
+                    # Legacy synthetic package tests do not contain Raw documents.
+                    for forecast in package["forecasts"]:
+                        cursor.execute(
+                            """
+                            INSERT INTO weather_mvp.weather_forecasts (
+                                run_id, location_id, forecast_time_utc,
+                                temperature_2m_c, precipitation_mm, wind_speed_10m_kmh
+                            ) VALUES (%s, %s, %s, %s, %s, %s)
+                            """,
+                            tuple(forecast[key] for key in (
+                                "run_id", "location_id", "forecast_time_utc",
+                                "temperature_2m_c", "precipitation_mm",
+                                "wind_speed_10m_kmh",
+                            )),
+                        )
 
                 for artifact in package["artifacts"]:
                     cursor.execute(
