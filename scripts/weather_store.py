@@ -755,3 +755,7 @@ def apply_weather_schema(connection):
     schema_path = PROJECT_ROOT / "sql" / "001_weather_schema.sql"
     with connection.cursor() as cursor:
         cursor.execute(schema_path.read_text(encoding="utf-8"))
+        cursor.execute(
+            (PROJECT_ROOT / "sql" / "002_weather_raw_staging.sql")
+            .read_text(encoding="utf-8")
+        )
