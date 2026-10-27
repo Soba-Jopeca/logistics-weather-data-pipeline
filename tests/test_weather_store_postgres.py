@@ -271,10 +271,11 @@ def test_query_uses_whole_version_fallback_and_as_of(database):
     _load(older)
     _load(newer)
 
+    as_of = now + timedelta(minutes=1)
     rows = query_forecasts(
         "br_sp_test",
         product_type="hourly_bundle",
-        as_of=now,
+        as_of=as_of,
     )
 
     assert len(rows) == 2
@@ -285,7 +286,7 @@ def test_query_uses_whole_version_fallback_and_as_of(database):
     historical = query_forecasts(
         "br_sp_test",
         product_type="hourly_bundle",
-        as_of=now - timedelta(hours=1),
+        as_of=as_of - timedelta(hours=1),
     )
     assert len(historical) == 1
     assert historical[0]["data_status"] == "unavailable"
