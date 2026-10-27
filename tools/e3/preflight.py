@@ -17,6 +17,11 @@ def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':'),
                                      allow_nan=False).encode()).hexdigest()
 
+def source_digest(path):
+    """Hash text sources consistently across LF and Windows CRLF checkouts."""
+    content = Path(path).read_bytes().replace(b'\r\n', b'\n')
+    return hashlib.sha256(content).hexdigest()
+
 def read_json(path):
     def unique(pairs):
         result = {}
@@ -74,7 +79,7 @@ def inspect_baseline(doc):
         raise GateError('Incomplete source inventory')
     for name, sha in doc['hashes'].items():
         path = contained(root, root / name)
-        if hashlib.sha256(path.read_bytes()).hexdigest() != sha:
+        if source_digest(path) != sha:
             raise GateError('Source hash mismatch: ' + name)
     return digest(doc['hashes'])
 

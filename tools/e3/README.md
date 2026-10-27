@@ -3,6 +3,8 @@
 Baseline: `70b02b044e36adaa0a29612da87cf8bf688567c9`.
 Only these 13 new files are in scope. Operational scripts, DAG, Compose, contracts,
 previous tests and historical records must remain byte-for-byte unchanged.
+Pinned text-source hashes normalize CRLF to LF so a Windows checkout with
+`core.autocrlf` preserves the approved baseline identity.
 
 ## Current status
 

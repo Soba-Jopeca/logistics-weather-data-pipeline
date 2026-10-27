@@ -15,7 +15,7 @@ import pytest
 
 from tools.e3.preflight import (BASELINE, BASELINE_HASHES, GateError, digest, read_json,
                                 validate_campaign, inspect_baseline, require_gate,
-                                verify_mount_identity, contained)
+                                verify_mount_identity, contained, source_digest)
 from tools.e3.ledger import Ledger, publish
 from tools.e3.runtime import ScriptClock, dependency_context, forbidden
 from tools.e3.fixtures import fixture_bytes
@@ -50,6 +50,14 @@ def approved(campaign):
 def test_baseline_inventory(campaign):
     assert inspect_baseline(campaign) == digest(BASELINE_HASHES)
     assert len(BASELINE_HASHES) >= 8
+
+
+def test_source_digest_normalizes_windows_line_endings(tmp_path):
+    lf = tmp_path / 'lf.txt'
+    crlf = tmp_path / 'crlf.txt'
+    lf.write_bytes(b'first\nsecond\n')
+    crlf.write_bytes(b'first\r\nsecond\r\n')
+    assert source_digest(lf) == source_digest(crlf)
 
 
 @pytest.mark.parametrize('field,value', [('baseline','bad'), ('enabled',1), ('campaign_id','oops'),
