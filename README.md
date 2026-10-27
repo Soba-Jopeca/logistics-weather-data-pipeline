@@ -24,7 +24,7 @@ O objetivo é apoiar decisões humanas. O projeto não automatiza alterações d
 - **Identificação do ciclo:** argumento obrigatório `--cycle-date AAAA-MM-DD`.
 - **Consumo previsto:** consultas SQL e tabela consolidada. Não há dashboard obrigatório.
 
-A necessidade operacional documentada prevê coletas a cada duas horas nas horas pares, rodada pré-planejamento às 14h, encerramento das tentativas até 14h15, publicação-alvo até 14h30 e frescor máximo de três horas no uso. Esses controles ainda precisam ser implementados e validados.
+A necessidade operacional documentada prevê coletas a cada duas horas nas horas pares, rodada pré-planejamento às 14h, encerramento das tentativas até 14h15, publicação-alvo até 14h30 e frescor máximo de três horas no uso. A consulta SQL aplica frescor e seleção de versão no instante `as_of`; agenda, corte automatizado, publicação operacional e validação em produção continuam pendentes.
 
 ## Estado atual
 
@@ -62,7 +62,7 @@ Foram executadas verificações manuais com dados simulados e mocks para:
 - Continuidade da rodada após resultado de falha em uma cidade.
 - Fluxo integrado de cinco cidades com respostas simuladas e persistência temporária.
 
-Essas verificações foram realizadas durante o desenvolvimento. A suíte de testes reproduzível no repositório e sua integração ao CI continuam pendentes.
+Essas verificações manuais documentam o desenvolvimento inicial. A suíte reproduzível foi adicionada no Passo 11 e executa sem chamadas meteorológicas reais; a integração contínua é definida em `.github/workflows/ci.yml`.
 
 ### Ambiente Docker — atualizado e validado em 13/10/2026
 
@@ -78,13 +78,25 @@ Essas verificações foram realizadas durante o desenvolvimento. A suíte de tes
 
 **Batch de referência no contêiner:** `ac2066c6-3250-48c1-b2c6-2b507f777bc1`.
 
-Os 160 registros normalizados foram produzidos em memória; sua carga no PostgreSQL permanece pendente.
+Os 160 registros normalizados dessa execução histórica foram produzidos em memória; ela não foi carregada retroativamente no PostgreSQL.
 
 Imagem publicada no Docker Hub em 13/10/2026. Pull pelo digest e execução verificados no mesmo computador, com Airflow 2.9.2, tzdata 2026.5 e `pip check` aprovado. Reprodução completa em máquina limpa ainda não validada.
 
 Em 14/10/2026, o banco `weather` e a role `weather_app` foram provisionados na instância PostgreSQL original. Conexão autenticada pelo contêiner Python, permissões mínimas, bloqueio de acesso aos metadados e persistência após reinicialização foram verificados. O passo 04 aguarda submissão das evidências e validação central.
 
-Não existem DAGs, tabelas meteorológicas ou cargas implementadas.
+O Compose operacional e a DAG permanecem preservados. O Passo 11 adiciona DDL, CLI explícita de migração/carga e consultas no schema separado `weather_mvp`; nenhum desses componentes foi aplicado ao banco operacional durante esta implementação.
+
+### Situação ratificada dos Passos 01–09
+
+| Passo | Estado documentado | Limite relevante |
+|---|---|---|
+| 01–02 | Caso de negócio fictício, requisitos e extração local registrados; contrato de dados v0.1 e matriz DQ aceitos como baseline documental na simulação. | Não há cliente, operação logística ou benefício financeiro real. |
+| 03 | Reprodução Docker validada no mesmo computador. | Não validada em máquina limpa; houve reutilização de cache. |
+| 04 | Provisionamento local do banco `weather` e da role `weather_app` registrado nas evidências. | Não é evidência de aplicação do novo schema `weather_mvp` nem de carga do MVP. |
+| 05–08 | Especificação Airflow, interface, parsing da DAG e execução manual registrados nos documentos de evidência. | A DAG continua sem agendamento automático; o Compose operacional não foi alterado nesta entrega. |
+| 09 | Encerrado documentalmente com limitações, conforme decisão ratificada. P05 foi aceite com limitações de cobertura. | B01 replay permanece não validado operacionalmente; B02 demonstrou inelegibilidade com divergência de classificação; B04, B05 e B09 mantêm as lacunas probatórias registradas. E3-C foi adiado. E3 completo e Passo 09 não são declarados validados. |
+
+O harness E3 e sua campanha permanecem em branch experimental separada; não foram incorporados nesta branch nem reexecutados.
 
 ## Contrato temporal
 
@@ -171,7 +183,7 @@ O timeout é de 10 segundos para conexão e 30 segundos de espera de leitura. N�
 
 **Sucesso de extração não equivale a publicação ou aptidão de todos os produtos.** Nulos permanecem `null`; totais, médias e máximos integrais exigem completude das métricas e dos horários necessários.
 
-Frescor no uso, publicação, fallback, consulta histórica as-of e sinalização de atraso operacional permanecem pendentes.
+O Passo 11 implementa publicação lógica no banco, consulta `as_of`, frescor máximo de três horas e fallback integral no caminho SQL opt-in. Agendamento, alerta de atraso, execução operacional e aceite dessas regras em produção permanecem pendentes.
 
 ## Arquivos gerados
 
@@ -200,7 +212,7 @@ Os registros normalizados são produzidos em memória, com:
 - `precipitation_mm`
 - `wind_speed_10m_kmh`
 
-Sua persistência no PostgreSQL será implementada posteriormente.
+O carregador do Passo 11 reconstrói os registros a partir do Raw verificado e grava a batch de forma transacional. Essa persistência só ocorre por invocação explícita; a extração e a DAG não disparam migração ou carga automaticamente.
 
 ## Preparação do ambiente Python
 
@@ -380,7 +392,7 @@ O comando reutiliza a configuração de `airflow-init`, mas executa Python diret
 
 A execução validada produziu 32 registros por cidade, totalizando 160, com status `success` e código 0. Raw e relatórios permanecem em `data/raw/` no Windows pelo bind mount de `data/`.
 
-Os registros normalizados continuam em memória nesta etapa.
+Nessa validação histórica, os registros normalizados continuaram em memória; a nova carga SQL opt-in não foi executada contra esse ambiente.
 
 ### Parar e retomar
 
@@ -389,7 +401,7 @@ docker compose stop
 docker compose start
 ```
 
-A instância PostgreSQL contém os bancos `airflow` e `weather`. O banco meteorológico ainda não possui tabelas de negócio nem dados carregados. O volume `postgres-data` mantém ambos os bancos entre remoções de contêineres. O comando `docker compose down -v` apaga esse volume.
+Na validação histórica de 13/10/2026, a instância PostgreSQL continha os bancos `airflow` e `weather` sem tabelas meteorológicas de negócio. O volume `postgres-data` mantém ambos os bancos entre remoções de contêineres. O comando `docker compose down -v` apaga esse volume; não foi executado nesta entrega.
 
 ### Configuração do banco meteorológico
 
@@ -462,13 +474,48 @@ Não acrescente `-v` ao comando `down`: essa opção remove o volume PostgreSQL.
 ## Arquitetura de referência
 
 ```text
-Open-Meteo → Python → Raw e relatórios → PostgreSQL + SQL/ELT → consultas analíticas
+Open-Meteo → extração Python → Raw/manifestos verificados
+                                   ↓
+                 CLI explícita → PostgreSQL weather_mvp → SQL por cidade/hora/as_of
 ```
 
-- **Implementado:** extração manual, cadastro, janela por ciclo, tentativas, validações e persistência Raw/relatórios.
-- **Ambiente configurado:** Docker, serviços Airflow e PostgreSQL com bancos `airflow` e `weather`, além da role `weather_app`.
-- **Testes da extração:** 73 testes versionados no passo 02, commit `80b9960`; não repetidos no contêiner durante o passo 03.
-- **Pendente:** especificação e implementação da orquestração, carga meteorológica, publicação dos produtos de dados, fallback e CI/CD, conforme os gates centrais.
+- **AS-IS:** extração Python manual, Open-Meteo, Raw imutável, relatórios e interface Airflow já documentados; agenda diária não está ativa.
+- **TO-BE do MVP:** CLI lê somente batches concluídas e revalida o encadeamento manifest/Raw/hash antes da normalização e carga SQL.
+- **Persistência:** schema PostgreSQL `weather_mvp`, separado dos metadados Airflow e do schema `public`; chaves estrangeiras, unicidade por run/localidade/instante, histórico de tentativas, artefatos e publicações por produto.
+- **Consumo:** SQL retorna temperaturas, precipitação e vento por cidade/hora, com status, frescor de três horas, seleção integral de uma versão, fallback identificável e instante histórico `as_of`.
+- **Integração Airflow:** a DAG original e seus três tasks permanecem inalterados. A carga é uma CLI manual, não uma tarefa automática da DAG.
+- **Limite operacional:** o DDL e a carga não foram aplicados ao banco `weather` operacional; evidências E3 também não foram alteradas.
+
+### Carga PostgreSQL e consultas
+
+O driver `psycopg2-binary` está declarado em `requirements.txt`. Configure as variáveis `WEATHER_DB_HOST`, `WEATHER_DB_PORT`, `WEATHER_DB_NAME`, `WEATHER_DB_USER` e `WEATHER_DB_PASSWORD` para um banco explicitamente autorizado. A CLI não executa migração implícita:
+
+```powershell
+# Aplicar somente em um banco descartável/autorizado
+python -m scripts.load_weather_batch --migrate
+
+# Carregar uma batch concluída após verificar manifest, completion, Raw e hashes
+python -m scripts.load_weather_batch --batch-id <batch-uuid>
+
+# Consultar um produto; sem --as-of usa o instante UTC atual
+python -m scripts.query_weather --location-id br_sp_campinas --product hourly_bundle
+```
+
+Uma repetição idêntica é no-op; IDs de batch já carregados com hashes de origem diferentes e batches incompletas são bloqueados. O arquivo [DDL do schema](sql/001_weather_schema.sql) é aditivo e não contém `DROP`. Não execute `--migrate` no banco operacional `weather` sem plano de segurança e autorização específica.
+
+O campo `published_at` registra a confirmação da carga SQL. O histórico `as_of` não inclui publicações posteriores ao instante consultado. Fallback escolhe uma única versão anterior publicada, com coleta de até três horas e cobertura completa do produto; não combina runs. `data_status` e `availability_reason` distinguem ausência, expiração, versão inelegível e previsão disponível. Consultas sintéticas dos testes não são resultados meteorológicos observados.
+
+Cada linha de resultado identifica `location_id`, `product_type`, `as_of_at`, `data_status`, `run_id`, `batch_id`, `collected_at`, `published_at`, `fallback_used`, `availability_reason`, `forecast_time_utc` e as três métricas. `hourly_bundle` só seleciona uma versão com as três métricas completas.
+
+### Testes e CI
+
+```powershell
+python -m pip install apache-airflow==2.9.2 --constraint https://raw.githubusercontent.com/apache/airflow/constraints-2.9.2/constraints-3.10.txt
+python -m pip install -r requirements-dev.txt
+python -m pytest -q
+```
+
+Para a suíte completa, use Python 3.10 com Airflow 2.9.2, como no CI. Os testes Python usam mocks e bloqueiam HTTP real. Os testes SQL só executam se as variáveis apontarem explicitamente para `WEATHER_DB_NAME=weather_test`, `WEATHER_DB_HOST=localhost` (ou `127.0.0.1`) e `WEATHER_TEST_DB_RESET=1`; eles apagam e recriam apenas o schema `weather_mvp` nesse banco descartável. O workflow [CI](.github/workflows/ci.yml) inicia PostgreSQL 16 descartável e executa a suíte completa.
 
 ## Documentação e governança
 
@@ -494,20 +541,9 @@ O contrato e a matriz DQ são baselines documentais aprovados na simulação R3.
 
 A janela por ciclo definida em R3 substitui o objetivo anterior de 24 horas. As evidências técnicas deste README indicam o que foi efetivamente verificado.
 
-## Próximas entregas
+## Fechamento dos Passos 10–11
 
-A evolução segue o checkpoint CP-2026-10-13 v2:
-
-1. Submeter as evidências do provisionamento do passo 04 e aguardar validação central.
-2. Após liberação do passo 05, especificar a orquestração Airflow.
-3. Após liberação do passo 06, preparar a interface Python pura/CLI.
-4. Após liberação do passo 07, implementar DAG pausada, com `schedule=None`, e validar parsing sem executar tarefas.
-5. Após liberação do passo 08, realizar a primeira execução manual.
-6. No passo 09, testar falhas e retentativas; ensaiar agenda somente após autorização específica.
-7. No passo 10, consolidar o gate da Seção 4, documentação e versionamento.
-8. Somente no passo 11, implementar DDL, carga e SQL meteorológicos, com os gates correspondentes.
-
-A reprodução do passo 03 foi validada centralmente com ressalvas: mesma máquina, reutilização de cache e ausência de validação em outro host. Essas limitações permanecem registradas.
+O pacote de entrega implementa DDL, carregador verificável, consulta SQL, testes PostgreSQL descartáveis, CI e esta documentação. A integração ao banco operacional, a automação Airflow da carga, a execução agendada e o merge continuam fora do aceite técnico local. A reprodução do Passo 03 permanece limitada ao mesmo computador e ao cache disponível; não foi demonstrada em máquina limpa.
 
 ## Princípios de engenharia
 
@@ -526,14 +562,20 @@ A reprodução do passo 03 foi validada centralmente com ressalvas: mesma máqui
 
 - A execução atual é manual; depende do computador e dos serviços locais.
 - A associação do ciclo é explícita; sua seleção automática será definida na orquestração.
-- A agenda, o corte das tentativas, a publicação e o atraso ainda não são automatizados.
-- As regras DQ-01 a DQ-12 não estão integralmente implementadas.
-- Não existe fallback operacional, controle de frescor no uso ou publicação as-of.
-- Replay de arquivos não comprova idempotência de carga no PostgreSQL.
-- Não há garantia de recuperação de uma gravação interrompida.
+- A agenda, o corte das tentativas e o alerta de atraso não são automatizados; o carregamento é explícito.
+- As regras DQ-01 a DQ-12 não estão integralmente automatizadas nem aceitas em produção; frescor, fallback e `as_of` existem somente no caminho SQL do MVP.
+- Não houve migração nem carga no banco operacional. A aplicação da migration e os testes contra PostgreSQL devem ser comprovados no ambiente descartável do CI.
+- Falhas de transação SQL fazem rollback; recuperação operacional e backup/retenção ainda não foram exercitados.
 - Previsões de modelo não representam observações confirmadas nem explicam atrasos de entregas.
 - O objetivo é infraestrutura local sem contratação de serviços pagos, sujeito às condições das ferramentas e APIs.
 - Uso e atribuição dos dados devem respeitar as condições da Open-Meteo. CI/CD também depende dos limites do plano utilizado.
+
+## Próximas evoluções
+
+- Mapear as regras DQ-01 a DQ-12 pendentes para controles e evidências específicos.
+- Preparar backup, permissões e execução revisada antes de qualquer migração ou carga autorizada no banco operacional.
+- Integrar a CLI à orquestração somente após validação descartável, definição do corte e autorização própria; não ativar agenda como parte desta entrega.
+- Exercitar restauração e retenção dos históricos Raw e SQL.
 
 ## Arquivos fora do versionamento
 
