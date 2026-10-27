@@ -382,6 +382,16 @@ def test_offline_raw_batch_loads_and_queries_end_to_end(
 
     assert result["loaded"] is True
     assert result["forecast_count"] == 160
+    assert len(package["raw_staging"]) == 5
+    connection = connect_weather_database()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) FROM weather_mvp.weather_raw_staging")
+            assert cursor.fetchone()[0] == 5
+            cursor.execute("SELECT COUNT(*) FROM weather_mvp.weather_forecasts")
+            assert cursor.fetchone()[0] == 160
+    finally:
+        connection.close()
     assert len(rows) == 32
     assert {row["data_status"] for row in rows} == {"available"}
     campinas_run_id = next(
@@ -390,3 +400,52 @@ def test_offline_raw_batch_loads_and_queries_end_to_end(
         if run["location_id"] == "br_sp_campinas"
     )
     assert {row["run_id"] for row in rows} == {campinas_run_id}
+
+
+def test_staging_rejects_mismatched_batch_run_identity(database):
+    """Composite foreign key blocks a batch_id inconsistent with its run."""
+    package = _package(now=datetime.now(timezone.utc))
+    _load(package)
+    connection = connect_weather_database()
+    try:
+        with pytest.raises(psycopg2.errors.ForeignKeyViolation):
+            with connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        INSERT INTO weather_mvp.weather_raw_staging (
+                            batch_id, run_id, location_id, raw_path,
+                            raw_sha256, raw_payload
+                        ) VALUES (%s, %s, %s, %s, %s, %s::jsonb)
+                        """,
+                        (str(uuid4()), package["runs"][0]["run_id"],
+                         package["runs"][0]["location_id"],
+                         "data/raw/weather_test.json", "a" * 64, "{}"),
+                    )
+    finally:
+        connection.close()
+
+
+def test_staging_transaction_rolls_back_with_core(database):
+    """Even after a staged write, a failing core operation rolls everything back."""
+    package = _package(now=datetime.now(timezone.utc))
+    connection = connect_weather_database()
+    try:
+        with pytest.raises(psycopg2.errors.CheckViolation):
+            with connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        INSERT INTO weather_mvp.locations
+                        (location_id, name, latitude, longitude, timezone)
+                        VALUES (%s, %s, %s, %s, %s)
+                        """,
+                        ("bad", "Bad", 99, 0, "UTC"),
+                    )
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT count(*) FROM weather_mvp.weather_raw_staging")
+            assert cursor.fetchone()[0] == 0
+            cursor.execute("SELECT count(*) FROM weather_mvp.weather_forecasts")
+            assert cursor.fetchone()[0] == 0
+    finally:
+        connection.close()
