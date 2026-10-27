@@ -505,6 +505,8 @@ Uma repetição idêntica é no-op; IDs de batch já carregados com hashes de or
 
 O campo `published_at` registra a confirmação da carga SQL. O histórico `as_of` não inclui publicações posteriores ao instante consultado. Fallback escolhe uma única versão anterior publicada, com coleta de até três horas e cobertura completa do produto; não combina runs. `data_status` e `availability_reason` distinguem ausência, expiração, versão inelegível e previsão disponível. Consultas sintéticas dos testes não são resultados meteorológicos observados.
 
+Cada linha de resultado identifica `location_id`, `product_type`, `as_of_at`, `data_status`, `run_id`, `batch_id`, `collected_at`, `published_at`, `fallback_used`, `availability_reason`, `forecast_time_utc` e as três métricas. `hourly_bundle` só seleciona uma versão com as três métricas completas.
+
 ### Testes e CI
 
 ```powershell
@@ -567,6 +569,13 @@ O pacote de entrega implementa DDL, carregador verificável, consulta SQL, teste
 - Previsões de modelo não representam observações confirmadas nem explicam atrasos de entregas.
 - O objetivo é infraestrutura local sem contratação de serviços pagos, sujeito às condições das ferramentas e APIs.
 - Uso e atribuição dos dados devem respeitar as condições da Open-Meteo. CI/CD também depende dos limites do plano utilizado.
+
+## Próximas evoluções
+
+- Mapear as regras DQ-01 a DQ-12 pendentes para controles e evidências específicos.
+- Preparar backup, permissões e execução revisada antes de qualquer migração ou carga autorizada no banco operacional.
+- Integrar a CLI à orquestração somente após validação descartável, definição do corte e autorização própria; não ativar agenda como parte desta entrega.
+- Exercitar restauração e retenção dos históricos Raw e SQL.
 
 ## Arquivos fora do versionamento
 
