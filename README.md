@@ -600,3 +600,35 @@ São públicos e versionáveis:
 João Pedro Caneca — [Soba-Jopeca](https://github.com/Soba-Jopeca)
 
 Projeto autoral de aprendizado e portfólio de Engenharia de Dados, desenvolvido incrementalmente. Não redistribui código de cursos usados como referência.
+
+
+## Seção 5 — PostgreSQL ELT (branch experimental S05)
+
+O carregador mantém Raw e hashes originais e materializa cada resposta verificada
+na tabela `weather_mvp.weather_raw_staging` (JSONB). Um SQL dedicado expande
+as séries horárias de staging para `weather_mvp.weather_forecasts` e compara
+todas as linhas com o pacote normalizado em Python antes do commit.
+As sete tabelas de negócio da versão 001 são preservadas. A versão 002
+é incremental, aplicada apenas por comando explícito de migração.
+
+A DAG `logistics_weather_warehouse` em `dags/weather_warehouse.py` permanece
+pausada e sem schedule. Requer acionamento manual com:
+`{"batch_id":"<UUID de batch concluído e verificado>"}`.
+Nenhuma extração Open-Meteo é disparada pela DAG warehouse e a extração
+não dispara automaticamente o warehouse. XCom contém apenas metadados pequenos.
+
+**Ambiente seguro:** antes de executar qualquer comando de migração/carga,
+confirmar `WEATHER_DB_NAME=weather_test`, host localhost/127.0.0.1,
+`WEATHER_TEST_DB_RESET=1` e isolamento do PostgreSQL operacional.
+Não aplicar esta migração ao banco operacional `weather` no mandato S05.
+Testes DB destrutivos exigem banco descartável e salvaguardas existentes.
+
+Com o banco descartável provisionado e ambiente isolado:
+- `python -m scripts.load_weather_batch --migrate` (ação explícita)
+- `python -m scripts.load_weather_batch --batch-id <UUID>`
+- `python -m scripts.query_weather --location-id br_sp_campinas --product hourly_bundle --as-of <ISO-8601>`
+- `python -m pytest -q` (suíte offline + PostgreSQL com gates)
+
+Os comandos acima são orientações, **não** evidência de execução. Durante S05,
+fixture/mock deve ser distinguida de coleta real; a janela R3 e o histórico
+documental permanecem regidos pelos contratos 08 e 09.
