@@ -103,8 +103,8 @@ networks:
     internal: true
 secrets:
   e3_db_password:
-    file: ${E3_ROOT:?}/control/secrets/db_password
+    file: ${E3_ROOT:?}/secrets/db_password
   e3_sql_connection:
-    file: ${E3_ROOT:?}/control/secrets/sql_connection
+    file: ${E3_ROOT:?}/secrets/sql_connection
   e3_fernet:
-    file: ${E3_ROOT:?}/control/secrets/fernet
+    file: ${E3_ROOT:?}/secrets/fernet

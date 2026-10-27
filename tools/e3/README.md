@@ -42,7 +42,8 @@ Do not run this Compose, CLI runner, DAG or controller against operational servi
    `campaign.example.json` is deliberately disabled; enabling it is not authorization.
 5. Prepare scenario directories, identical `config/locations.json` snapshots,
    runtime DAG/plugin sources from `runtime_sources`, logs/tmp and metadata directory.
-6. Secrets are campaign-only files, never operational `.env` and never Git.
+6. Secrets are campaign-only files under `${E3_ROOT}/secrets`, outside the
+   read-only `control` bind used by metadata; never use operational `.env` or Git.
 7. Approve initialization of the new metadata schema separately. No command in
    this package automatically runs `airflow db migrate`.
 8. Prove network and mount isolation BEFORE allowing task execution. Docker
