@@ -198,5 +198,50 @@ class WeatherDagStructureTests(unittest.TestCase):
         self.assertTrue(any(isinstance(node, ast.Raise) for node in ast.walk(function)))
 
 
+class WarehouseDagStructureTests(unittest.TestCase):
+    """Validate warehouse DAG without executing tasks, migrations or API calls."""
+
+    def test_manual_warehouse_dag_static_contract(self):
+        path = ROOT / "dags" / "weather_warehouse.py"
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        source = path.read_text(encoding="utf-8")
+        self.assertIn('dag_id="logistics_weather_warehouse"', source)
+        self.assertIn("schedule=None", source)
+        self.assertIn("catchup=False", source)
+        self.assertIn("is_paused_upon_creation=True", source)
+        self.assertIn('conf["batch_id"]', source)
+        defined = {
+            node.name for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef)
+        }
+        self.assertTrue({
+            "validate_completed_batch", "load_warehouse_batch"
+        }.issubset(defined))
+        self.assertNotIn("requests.get(", source)
+        self.assertNotIn("execute_daily_extraction", source)
+
+    def test_warehouse_dag_parses_in_isolation(self):
+        from airflow.models import DagBag
+        from unittest.mock import patch
+        path = ROOT / "dags" / "weather_warehouse.py"
+        with patch.object(socket.socket, "connect", side_effect=forbidden):
+            bag = DagBag(
+                dag_folder=str(path), include_examples=False,
+                read_dags_from_db=False, safe_mode=False,
+            )
+        self.assertFalse(bag.import_errors)
+        dag = bag.dags["logistics_weather_warehouse"]
+        self.assertEqual(
+            set(dag.task_ids),
+            {"validate_completed_batch", "load_warehouse_batch"}
+        )
+        self.assertFalse(dag.timetable.can_be_scheduled)
+        self.assertTrue(dag.is_paused_upon_creation)
+        self.assertEqual(
+            dag.get_task("validate_completed_batch").downstream_task_ids,
+            {"load_warehouse_batch"},
+        )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
