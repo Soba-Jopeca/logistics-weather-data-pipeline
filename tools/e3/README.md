@@ -41,7 +41,8 @@ Do not run this Compose, CLI runner, DAG or controller against operational servi
 4. Prepare campaign JSON, exact scenario plans and externally reviewed evidence.
    `campaign.example.json` is deliberately disabled; enabling it is not authorization.
 5. Prepare scenario directories, identical `config/locations.json` snapshots,
-   runtime DAG/plugin sources from `runtime_sources`, logs/tmp and metadata directory.
+   runtime DAG/plugin sources from `runtime_sources` and logs/tmp. PostgreSQL uses
+   a project-scoped named volume rather than a Windows-host bind mount.
 6. Secrets are campaign-only files under `${E3_ROOT}/secrets`, outside the
    read-only `control` bind used by metadata; never use operational `.env` or Git.
 7. Approve initialization of the new metadata schema separately. No command in

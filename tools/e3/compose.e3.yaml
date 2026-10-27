@@ -24,11 +24,7 @@ services:
         read_only: true
         bind:
           create_host_path: false
-      - type: bind
-        source: ${E3_ROOT:?Exclusive campaign root required}/metadata
-        target: /var/lib/postgresql/data
-        bind:
-          create_host_path: false
+      - metadata:/var/lib/postgresql/data
     networks: [isolated]
     healthcheck:
       test: [CMD-SHELL, "pg_isready -U e3 -d e3_metadata"]
@@ -101,6 +97,8 @@ services:
 networks:
   isolated:
     internal: true
+volumes:
+  metadata:
 secrets:
   e3_db_password:
     file: ${E3_ROOT:?}/secrets/db_password

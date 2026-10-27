@@ -269,6 +269,8 @@ def test_compose_static_no_operational_mounts():
     assert 'docker.sock' not in text and 'external: true' not in text
     assert 'control/secrets' not in text
     assert 'file: ${E3_ROOT:?}/secrets/' in text
+    assert 'metadata:/var/lib/postgresql/data' in text
+    assert 'source: ${E3_ROOT:?}/metadata' not in text
     assert 'airflow db migrate' not in text
     assert 'entrypoint: [python, -m, tools.e3.preflight]' in text
 
