@@ -42,7 +42,7 @@ def main(argv=None):
             connection = connect_weather_database()
             with connection:
                 apply_weather_schema(connection)
-            print(json.dumps({"migration": SCHEMA_VERSION, "applied": True}))
+            print(json.dumps({"migrations": [SCHEMA_VERSION, "002_weather_raw_staging"], "applied": True}))
             return 0
 
         package = build_load_package(args.batch_id)
