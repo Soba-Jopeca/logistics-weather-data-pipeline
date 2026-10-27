@@ -9,9 +9,9 @@ SELECT
     s.run_id,
     s.location_id,
     to_timestamp((v.time_value #>> '{}')::DOUBLE PRECISION),
-    (s.raw_payload #> ARRAY['hourly','temperature_2m', (v.ordinality-1)::TEXT])::TEXT::DOUBLE PRECISION,
-    (s.raw_payload #> ARRAY['hourly','precipitation', (v.ordinality-1)::TEXT])::TEXT::DOUBLE PRECISION,
-    (s.raw_payload #> ARRAY['hourly','wind_speed_10m', (v.ordinality-1)::TEXT])::TEXT::DOUBLE PRECISION
+    (s.raw_payload #>> ARRAY['hourly','temperature_2m', (v.ordinality-1)::TEXT])::DOUBLE PRECISION,
+    (s.raw_payload #>> ARRAY['hourly','precipitation', (v.ordinality-1)::TEXT])::DOUBLE PRECISION,
+    (s.raw_payload #>> ARRAY['hourly','wind_speed_10m', (v.ordinality-1)::TEXT])::DOUBLE PRECISION
 FROM weather_mvp.weather_raw_staging AS s
 CROSS JOIN LATERAL jsonb_array_elements(s.raw_payload #> '{hourly,time}')
     WITH ORDINALITY AS v(time_value, ordinality)
