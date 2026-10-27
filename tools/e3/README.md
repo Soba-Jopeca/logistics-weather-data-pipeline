@@ -76,6 +76,8 @@ clock reads fail. Historical technical timestamps in weather_interface remain re
 and must be labeled accordingly; global datetime/Airflow clocks are never patched.
 Faults: locations mapping to none/null/corrupt/timeout; after_publish matching a
 specific original persistence reference, e.g. claim.json or readiness.json.
+B08 may additionally use `race_barrier` with exactly two participants and a
+bounded timeout to release the instrumented Airflow and CLI producers together.
 
 ## Budget and isolation limits
 

@@ -198,6 +198,45 @@ def test_finite_clock():
     with pytest.raises(GateError): ScriptClock({'prepare':['2026-10-20T13:45:00']})
 
 
+def test_race_barrier_releases_exactly_two_participants(tmp_path):
+    import threading
+    import time
+    from tools.e3.runtime import _wait_for_race_barrier
+
+    root=tmp_path/'scenario'
+    root.mkdir()
+    barrier={'participants':2,'timeout_seconds':5}
+    errors=[]
+
+    def wait():
+        try:
+            _wait_for_race_barrier(root,barrier)
+        except Exception as error:
+            errors.append(error)
+
+    workers=[threading.Thread(target=wait) for _ in range(2)]
+    for worker in workers: worker.start()
+    deadline=time.monotonic()+5
+    ready=root/'coordination/claim-race'
+    while len(list(ready.glob('ready-*.json'))) != 2 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert len(list(ready.glob('ready-*.json'))) == 2
+    (ready/'release').write_bytes(b'release')
+    for worker in workers:
+        worker.join(timeout=5)
+        assert not worker.is_alive()
+    assert errors == []
+
+
+def test_race_barrier_rejects_unbounded_participants(tmp_path):
+    from tools.e3.runtime import _wait_for_race_barrier
+
+    root=tmp_path/'scenario'
+    root.mkdir()
+    with pytest.raises(GateError):
+        _wait_for_race_barrier(root,{'participants':3,'timeout_seconds':5})
+
+
 def test_fixture_deterministic_and_faults(locations):
     first=fixture_bytes(locations[0],'2026-10-20')
     assert first==fixture_bytes(locations[0],'2026-10-20')

@@ -7,9 +7,11 @@ from unittest.mock import patch
 from uuid import uuid4
 import builtins
 import io
+import os
 import socket
 import threading
 import subprocess
+import time
 
 from tools.e3.preflight import GateError, contained, digest, require_gate
 from tools.e3.fixtures import fixture_bytes
@@ -42,6 +44,34 @@ def forbidden(*args, **kwargs):
     raise GateError('Live transport/process operation forbidden')
 
 
+def _wait_for_race_barrier(root, barrier):
+    if (not isinstance(barrier, dict) or set(barrier) != {'participants', 'timeout_seconds'}
+            or type(barrier['participants']) is not int or barrier['participants'] != 2
+            or type(barrier['timeout_seconds']) is not int
+            or not 1 <= barrier['timeout_seconds'] <= 120):
+        raise GateError('Invalid race barrier plan')
+    directory = contained(root, Path(root) / 'coordination' / 'claim-race')
+    directory.mkdir(parents=True, exist_ok=True)
+    marker = directory / ('ready-' + str(uuid4()) + '.json')
+    with marker.open('xb') as ready:
+        ready.write(b'ready')
+        ready.flush()
+        os.fsync(ready.fileno())
+    deadline = time.monotonic() + barrier['timeout_seconds']
+    release = directory / 'release'
+    while True:
+        count = len(list(directory.glob('ready-*.json')))
+        if count > barrier['participants']:
+            raise GateError('Unexpected race barrier participant count')
+        if count == barrier['participants'] and release.is_file():
+            if release.read_bytes() != b'release':
+                raise GateError('Invalid race barrier release marker')
+            return
+        if time.monotonic() >= deadline:
+            raise GateError('Race barrier participant timeout')
+        time.sleep(0.01)
+
+
 @contextmanager
 def dependency_context(*, root, scenario, ledger, locations, cycle_date, clocks,
                        faults=None, allowed_db=None):
@@ -59,7 +89,7 @@ def dependency_context(*, root, scenario, ledger, locations, cycle_date, clocks,
     if not root.is_dir():
         raise GateError('Scenario root must already exist')
     faults = faults or {}
-    if not set(faults) <= {'locations', 'after_publish'}:
+    if not set(faults) <= {'locations', 'after_publish', 'race_barrier'}:
         raise GateError('Unknown fault plan')
     original_quality = daily._quality
     original_evaluate = daily.evaluate_for_consumption
@@ -102,6 +132,8 @@ def dependency_context(*, root, scenario, ledger, locations, cycle_date, clocks,
     def wrap_policy(original, phase):
         @wraps(original)
         def call(*args, **kwargs):
+            if phase == 'prepare' and 'race_barrier' in faults:
+                _wait_for_race_barrier(root, faults['race_barrier'])
             kwargs['project_root'] = root
             kwargs['clock'] = lambda: clock.read(phase)
             if phase == 'execute':
