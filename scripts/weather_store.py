@@ -756,6 +756,11 @@ def apply_weather_schema(connection):
     with connection.cursor() as cursor:
         cursor.execute(schema_path.read_text(encoding="utf-8"))
         cursor.execute(
-            (PROJECT_ROOT / "sql" / "002_weather_raw_staging.sql")
-            .read_text(encoding="utf-8")
+            "SELECT 1 FROM weather_mvp.schema_migrations WHERE version = %s",
+            ("002_weather_raw_staging",),
         )
+        if cursor.fetchone() is None:
+            cursor.execute(
+                (PROJECT_ROOT / "sql" / "002_weather_raw_staging.sql")
+                .read_text(encoding="utf-8")
+            )
