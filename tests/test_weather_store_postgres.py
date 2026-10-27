@@ -427,8 +427,9 @@ def test_staging_rejects_mismatched_batch_run_identity(database):
 
 
 def test_staging_transaction_rolls_back_with_core(database):
-    """Even after a staged write, a failing core operation rolls everything back."""
+    """A staged JSON insert is rolled back if a subsequent core insert fails."""
     package = _package(now=datetime.now(timezone.utc))
+    _load(package)
     connection = connect_weather_database()
     try:
         with pytest.raises(psycopg2.errors.CheckViolation):
@@ -436,16 +437,31 @@ def test_staging_transaction_rolls_back_with_core(database):
                 with connection.cursor() as cursor:
                     cursor.execute(
                         """
-                        INSERT INTO weather_mvp.locations
-                        (location_id, name, latitude, longitude, timezone)
-                        VALUES (%s, %s, %s, %s, %s)
+                        INSERT INTO weather_mvp.weather_raw_staging (
+                            batch_id, run_id, location_id, raw_path,
+                            raw_sha256, raw_payload
+                        ) VALUES (%s, %s, %s, %s, %s, %s::jsonb)
                         """,
-                        ("bad", "Bad", 99, 0, "UTC"),
+                        (package["batch"]["batch_id"],
+                         package["runs"][0]["run_id"],
+                         package["runs"][0]["location_id"],
+                         "data/raw/weather_test.json", "a" * 64, "{}"),
+                    )
+                    cursor.execute(
+                        """
+                        INSERT INTO weather_mvp.weather_forecasts (
+                            run_id, location_id, forecast_time_utc,
+                            precipitation_mm
+                        ) VALUES (%s, %s, %s, -1)
+                        """,
+                        (package["runs"][0]["run_id"],
+                         package["runs"][0]["location_id"],
+                         datetime.now(timezone.utc) + timedelta(days=1)),
                     )
         with connection.cursor() as cursor:
             cursor.execute("SELECT count(*) FROM weather_mvp.weather_raw_staging")
             assert cursor.fetchone()[0] == 0
             cursor.execute("SELECT count(*) FROM weather_mvp.weather_forecasts")
-            assert cursor.fetchone()[0] == 0
+            assert cursor.fetchone()[0] == 2
     finally:
         connection.close()
