@@ -508,11 +508,12 @@ O campo `published_at` registra a confirmação da carga SQL. O histórico `as_o
 ### Testes e CI
 
 ```powershell
+python -m pip install apache-airflow==2.9.2 --constraint https://raw.githubusercontent.com/apache/airflow/constraints-2.9.2/constraints-3.10.txt
 python -m pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
-Os testes Python usam mocks e bloqueiam HTTP real. Os testes SQL só executam se as variáveis apontarem explicitamente para `WEATHER_DB_NAME=weather_test`, `WEATHER_DB_HOST=localhost` (ou `127.0.0.1`) e `WEATHER_TEST_DB_RESET=1`; eles apagam e recriam apenas o schema `weather_mvp` nesse banco descartável. O workflow [CI](.github/workflows/ci.yml) inicia PostgreSQL 16 descartável e executa a suíte completa. Resultados de CI devem ser consultados na execução do workflow; a existência do arquivo não comprova uma execução verde.
+Para a suíte completa, use Python 3.10 com Airflow 2.9.2, como no CI. Os testes Python usam mocks e bloqueiam HTTP real. Os testes SQL só executam se as variáveis apontarem explicitamente para `WEATHER_DB_NAME=weather_test`, `WEATHER_DB_HOST=localhost` (ou `127.0.0.1`) e `WEATHER_TEST_DB_RESET=1`; eles apagam e recriam apenas o schema `weather_mvp` nesse banco descartável. O workflow [CI](.github/workflows/ci.yml) inicia PostgreSQL 16 descartável e executa a suíte completa.
 
 ## Documentação e governança
 
